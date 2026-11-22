@@ -4,9 +4,10 @@ PokerCaption è un’applicazione desktop Windows per disporre le finestre dei t
 
 ## Installazione su Windows
 
-1. Scarica `PokerCaption-Setup-1.0.0-win-x86.exe` dalla pagina [Release di PokerCaption](https://github.com/GoryNickel9/PokerCaption/releases/latest).
-2. Esegui il setup e apri PokerCaption dal menu Start. Il setup include il runtime .NET Desktop e installa l’app per l’utente corrente in `%LOCALAPPDATA%\Programs\PokerCaption`.
-3. Per aggiornare, chiudi PokerCaption e Sisal prima di eseguire il nuovo setup. L’installazione conserva impostazioni e profili nella cartella dell’app.
+1. Scarica il file `PokerCaption-Setup-*-win-x86.exe` dalla pagina [Release di PokerCaption](https://github.com/GoryNickel9/PokerCaption/releases/latest).
+2. Esegui il setup e scegli una cartella in cui il tuo utente può scrivere. La destinazione proposta è `%LOCALAPPDATA%\Programs\PokerCaption`. Il setup include il runtime .NET Desktop.
+3. Se vuoi il collegamento sul desktop, seleziona la relativa casella. Puoi sempre aprire PokerCaption dal menu Start.
+4. Per aggiornare, chiudi PokerCaption e Sisal e seleziona la cartella già in uso per conservare impostazioni e profili.
 
 Il setup è scaricabile come allegato della release. Il repository contiene il sorgente WinForms, il sorgente delle DLL native e le istruzioni del setup. Il file `.sha256` allegato riporta l’hash del programma di installazione.
 

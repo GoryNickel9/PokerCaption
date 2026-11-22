@@ -6,7 +6,7 @@ AppPublisher=PokerCaption
 AppPublisherURL=https://github.com/GoryNickel9/PokerCaption
 DefaultDirName={localappdata}\Programs\PokerCaption
 DefaultGroupName=PokerCaption
-DisableDirPage=yes
+DisableDirPage=no
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x86compatible
@@ -24,8 +24,12 @@ Name: "it"; MessagesFile: "compiler:Languages\Italian.isl"
 [Files]
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
+
 [Icons]
 Name: "{userprograms}\PokerCaption"; Filename: "{app}\PokerCaption.exe"; WorkingDir: "{app}"
+Name: "{userdesktop}\PokerCaption"; Filename: "{app}\PokerCaption.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\PokerCaption.exe"; Description: "{cm:LaunchProgram,PokerCaption}"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent unchecked
