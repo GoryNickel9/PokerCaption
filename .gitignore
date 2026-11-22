@@ -5,8 +5,6 @@
 **/.vs/
 **/__pycache__/
 /assets/
-/mockup/Desktop/
-/mockup/*.png
 *.exe
 *.dll
 *.pdb

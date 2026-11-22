@@ -74,8 +74,8 @@ namespace PokerCaption
                 return 0;
             }
 
-            if (args is ["--ui-preview"] || (args.Length >= 2 && args[0] == "--form" && args[1] == "Form1"))
-                return PreviewWorkspace(args);
+            if (args is ["--ui-preview"])
+                return PreviewWorkspace();
 
             ApplicationConfiguration.Initialize();
 
@@ -130,7 +130,7 @@ namespace PokerCaption
             return 0;
         }
 
-        private static int PreviewWorkspace(string[] args)
+        private static int PreviewWorkspace()
         {
             ApplicationConfiguration.Initialize();
             Ini = new IniFile(null);
@@ -142,10 +142,6 @@ namespace PokerCaption
             service.ConfigDir = Path.Combine(AppDir, "TableManagerConfigs");
             service.Load(Ini);
             controller.Build(connectToClient: false);
-            var pages = DesktopWindow.GetWorkspace(controller.Form);
-            if (args.Length >= 3 && int.TryParse(args[2], out int page) &&
-                pages.Controls.Cast<Control>().FirstOrDefault(c => c.TabIndex == page) is { } previewPage)
-                pages.SelectPage(previewPage);
             Application.Run(controller.Form);
             return 0;
         }
