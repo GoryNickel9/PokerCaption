@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -315,6 +315,10 @@ namespace PokerCaption
             t.Title = "Menkab V - No Limit 6+ Hold'em button blind€250 ante€250 Play Money - Logged In as SamplePlayer";
             TitleParser.Apply(t);
             Check("titolo sisal", t.TableName == "Menkab V" && t.Bb == 250 && t.Ante == 250 && t.HeroNick == "SamplePlayer" && t.ShortDeck && t.IsPlayMoney);
+            t = new TableInfo { Title = "Hercules VII - Limit Hold'em 500/1,000 Play Money - Logged In as SamplePlayer" };
+            TitleParser.Apply(t);
+            Check("titolo Sisal Limit Hold'em", t is
+                { TableName: "Hercules VII", GameType: "FLHE", Sb: 500, Bb: 1000, IsPlayMoney: true, IsTourney: false });
 
             // --- regole [AdvancedBets] ---
             var tmp = Path.Combine(Path.GetTempPath(), "sc_adv.ini");
@@ -740,12 +744,12 @@ namespace PokerCaption
                 bool italian = form.Controls.Find("workspaceNavOptions", true).Single().Text == "Opzioni" &&
                     IniFile.Load(uiTestPath).Get("PokerCaption", "Language") == "it" &&
                     UiLanguage.Text("Formula guide body").StartsWith("OPERATORI", StringComparison.Ordinal);
-                var rule = (CheckBox)form.Controls.Find("CheckBox327", true).Single();
+                var rule = (CheckBox)form.Controls.Find("CheckBox173", true).Single();
                 rule.Checked = true;
-                bool savedRule = rule.Text == "Chiudi l’avviso di tavolo chiuso" &&
-                    IniFile.Load(uiTestPath).Get("AutoDialog", "Caption0") == "table is closed";
+                bool savedRule = rule.Text == "Chiudi automaticamente i tavoli conclusi" &&
+                    IniFile.Load(uiTestPath).GetBool("PokerCaption", "CloseTableHasBeenClosed", false);
                 selector.SelectedIndex = 0;
-                Check("Language switches the desktop live and dialog rules keep their original match text",
+                Check("Language switches the desktop live and the closure toggle keeps its saved value",
                     italian && savedRule && form.Controls.Find("workspaceNavOptions", true).Single().Text == "Options" &&
                     IniFile.Load(uiTestPath).Get("PokerCaption", "Language") == "en");
                 var hudToggle = (CheckBox)form.Controls.Find("hudActive", true).Single();

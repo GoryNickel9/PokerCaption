@@ -135,18 +135,6 @@
   <data name="Table closure" xml:space="preserve">
     <value>Chiusura tavoli</value>
   </data>
-  <data name="Auto close 'This table has been closed' tables" xml:space="preserve">
-    <value>Chiudi i tavoli già dichiarati chiusi</value>
-  </data>
-  <data name="Close 'table is closed'" xml:space="preserve">
-    <value>Chiudi l’avviso di tavolo chiuso</value>
-  </data>
-  <data name="Close Current Session Information" xml:space="preserve">
-    <value>Chiudi le informazioni sulla sessione</value>
-  </data>
-  <data name="Keep playing in Current Session" xml:space="preserve">
-    <value>Continua la sessione corrente</value>
-  </data>
   <data name="Stay connected on inactivity timeout" xml:space="preserve">
     <value>Mantieni la connessione in caso di inattività</value>
   </data>
@@ -327,4 +315,13 @@ Alcuni valori dipendono dal client. Se manca un valore richiesto, BetScript prov
   <data name="Value" xml:space="preserve"><value>Valore</value></data>
   <data name=" (reloaded)" xml:space="preserve"><value> (ricaricato)</value></data>
   <data name="{0} keys" xml:space="preserve"><value>{0} chiavi</value></data>
+  <data name="Automatically close finished tables" xml:space="preserve">
+    <value>Chiudi automaticamente i tavoli conclusi</value>
+  </data>
+  <data name="Close the insufficient chips notice" xml:space="preserve">
+    <value>Chiudi l’avviso di gettoni insufficienti</value>
+  </data>
+  <data name="Close the stack update notice" xml:space="preserve">
+    <value>Chiudi l’avviso di aggiornamento dello stack</value>
+  </data>
 </root>

@@ -2,22 +2,23 @@ using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using PokerCaption.Config;
+using PokerCaption.Native;
 
 namespace PokerCaption.Engine;
 
 public sealed partial class AutoDialogEngine
 {
-    internal static void CheckOptionsClosures(IEnumerable<string> optionCaptions, Action<string, bool, string> check)
+    internal static void CheckOptionsClosures(Action<string, bool, string> check)
     {
-        var captions = optionCaptions.ToArray();
         var activePopups = new Dictionary<IntPtr, IntPtr>();
         var windowClasses = new Dictionary<IntPtr, string>();
+        var renderedNotices = new Dictionary<IntPtr, SharedMemory.RenderedNotice>();
         var engine = new AutoDialogEngine(null, table => activePopups.GetValueOrDefault(table, table),
-            window => windowClasses.TryGetValue(window, out var name) ? name : TableScanner.GetClass(window));
+            window => windowClasses.TryGetValue(window, out var name) ? name : TableScanner.GetClass(window),
+            window => renderedNotices.GetValueOrDefault(window));
         ClosureTestChild.RegisterFixtureClass(PokerStarsDialogButtonClass);
         ClosureTestChild.RegisterFixtureClass(FlutterDialogButtonClass);
         engine._clientPids.Add((uint)Environment.ProcessId);
-        engine.SetOptionCaptions(captions);
         using var owner = new ClosureTestForm("Options test owner");
         owner.Show();
         owner.Enabled = false;
@@ -27,7 +28,8 @@ public sealed partial class AutoDialogEngine
         bool Exercise(string title, string childText, string childClass = "Static", bool modal = true,
             int delayMs = 0, bool expectClose = true, bool recognized = true, string otherButton = null,
             string windowClass = null, bool visibleChild = true, string otherLabel = null, string otherButtonClass = null,
-            Action<ClosureTestChild> beforeDeadline = null, bool expectClick = false)
+            Action<ClosureTestChild> beforeDeadline = null, bool expectClick = false,
+            SharedMemory.RenderedNotice renderedNotice = SharedMemory.RenderedNotice.None)
         {
             using var window = new ClosureTestForm(title);
             if (modal) window.Show(owner);
@@ -36,6 +38,7 @@ public sealed partial class AutoDialogEngine
             using var additionalButton = new ClosureTestChild(window, otherButtonClass ?? childClass, otherButton);
             using var additionalLabel = new ClosureTestChild(window, "Static", otherLabel);
             var handle = window.Handle;
+            renderedNotices[handle] = renderedNotice;
             if (windowClass != null || modal) windowClasses.Add(handle, windowClass ?? NativeDialogClass);
             if (!recognized) engine._clientPids.Clear();
             engine.ScanWindow(handle, 0, engine._runRevision, engine._configRevision);
@@ -51,10 +54,10 @@ public sealed partial class AutoDialogEngine
             Application.DoEvents();
             if (!recognized) engine._clientPids.Add((uint)Environment.ProcessId);
             windowClasses.Remove(handle);
-            var expectedMessages = !expectClick ? Array.Empty<(int, IntPtr, IntPtr)>() : title == "Inactivity Timeout"
-                ? new[] { ((int)WmMouseMove, IntPtr.Zero, ClickPoint), ((int)WmLeftButtonDown, (IntPtr)1, ClickPoint),
-                    ((int)WmLeftButtonUp, IntPtr.Zero, ClickPoint) }
-                : new[] { ((int)WmLeftButtonDown, (IntPtr)1, ClickPoint), ((int)WmLeftButtonUp, IntPtr.Zero, ClickPoint) };
+            renderedNotices.Remove(handle);
+            var expectedMessages = !expectClick ? Array.Empty<(int, IntPtr, IntPtr)>() :
+                new[] { ((int)WmMouseMove, IntPtr.Zero, ClickPoint), ((int)WmLeftButtonDown, (IntPtr)1, ClickPoint),
+                    ((int)WmLeftButtonUp, IntPtr.Zero, ClickPoint) };
             if (remainedOpen && window.Visible != expectClose && window.CloseMessages == (expectClose ? 1 : 0) &&
                 child.MouseMessages.SequenceEqual(expectedMessages) && additionalButton.MouseMessages.Count == 0) return true;
             check($"Options WinForms fixture {title}", false,
@@ -62,81 +65,109 @@ public sealed partial class AutoDialogEngine
             return false;
         }
 
-        foreach (string caption in captions)
-        {
-            var config = new IniFile(null);
-            config.Set("AutoDialog", "Caption0", caption);
-            const int delay = 0;
-            config.Set("AutoDialog", "Delay0", delay);
-            engine.Load(config);
-            check("Options WinForms dialog " + caption,
-                Exercise(caption, null, delayMs: delay) &&
-                Exercise("Other dialog", caption, delayMs: delay) &&
-                Exercise(caption, null, modal: false, delayMs: delay, expectClose: false), "");
-        }
+        var closureConfig = new IniFile(null);
+        closureConfig.Set("PokerCaption", "CloseTableHasBeenClosed", 1);
+        closureConfig.Set("PokerCaption", "InactivityTO", 1);
+        closureConfig.Set("PokerCaption", "DismissInsufficientChips", 1);
+        closureConfig.Set("PokerCaption", "DismissStackUpdate", 1);
+        engine.Load(closureConfig);
+        engine._layoutOnly = true;
+        check("Options unified rule closes supported dialogs in layout mode",
+            Exercise("table is closed", null) &&
+            Exercise("Other dialog", "This table has been closed") &&
+            Exercise("Other dialog", ConcludedText + " and the table will close in 6 sec") &&
+            Exercise("table is closed", null, modal: false, expectClose: false) &&
+            Exercise("Other dialog", "This table has been closed by another player", expectClose: false), "");
 
-        foreach (var (key, caption) in new[]
+        using (var table = new ClosureTestForm("Options test table"))
+        using (var other = new ClosureTestForm("Options other table"))
+        using (var popup = new ClosureTestForm("table is closed"))
         {
-            ("CloseTableHasBeenClosed", TableClosed.Caption),
-        })
-        {
-            using var table = new ClosureTestForm("Options test table");
-            using var other = new ClosureTestForm("Options other table");
-            using var popup = new ClosureTestForm("Options table message");
             table.Show();
             other.Show();
             table.Enabled = false;
             popup.Show(table);
+            windowClasses.Add(popup.Handle, NativeDialogClass);
             activePopups.Add(table.Handle, popup.Handle);
-            using var label = new ClosureTestChild(popup, "Static", caption.ToLowerInvariant());
-            var config = new IniFile(null);
-            engine.Load(config);
-            engine.SetClosureTables(new[] { table.Handle, other.Handle });
-            popup.Text = caption;
+            engine.SetClosureTables([table.Handle, other.Handle]);
             engine.ScanWindow(popup.Handle, 0, engine._runRevision, engine._configRevision);
-            Flush();
-            bool rejectedTitleAndWrongCase = !engine._tableClosures.ContainsKey(table.Handle);
-            popup.Text = "Options table message";
-            string extendedCaption = caption + " (fixture suffix)";
-            label.SetText(extendedCaption);
-            engine.ScanWindow(popup.Handle, 0, engine._runRevision, engine._configRevision);
-            Flush();
-            bool fullOrPrefix = engine._tableClosures.ContainsKey(table.Handle) == (caption != TableClosed.Caption);
-            label.SetText(caption);
-            engine.ScanWindow(popup.Handle, 0, engine._runRevision, engine._configRevision);
-            Flush();
-            config.Set("PokerCaption", key, 1);
-            engine.Load(config);
             Flush();
             Application.DoEvents();
-            bool waited = table.Visible && table.CloseMessages == 0 && popup.Visible && popup.CloseMessages == 0;
-            popup.Close();
+            bool popupClosedFirst = !popup.Visible && popup.CloseMessages == 1 && table.CloseMessages == 0;
             activePopups.Remove(table.Handle);
             table.Enabled = true;
-            config.Set("PokerCaption", key, 0);
-            engine.Load(config);
+            Flush(100);
+            Application.DoEvents();
+            check("Options closes popup before its tracked table", popupClosedFirst &&
+                !table.Visible && table.CloseMessages == 1 && other.Visible, "");
+        }
+
+        using (var table = new ClosureTestForm("Rendered table"))
+        using (var other = new ClosureTestForm("Other table"))
+        {
+            table.Show();
+            other.Show();
+            engine.SetClosureTables([table.Handle]);
+            engine.ObserveTableEnd(table.Handle);
+            engine.ObserveTableEnd(other.Handle);
+            closureConfig.Set("PokerCaption", "CloseTableHasBeenClosed", 0);
+            engine.Load(closureConfig);
             Flush();
             Application.DoEvents();
-            bool disabled = table.Visible && table.CloseMessages == 0;
-            config.Set("PokerCaption", key, 1);
-            engine.Load(config);
+            bool cancelled = table.CloseMessages == 0;
+            closureConfig.Set("PokerCaption", "CloseTableHasBeenClosed", 1);
+            engine.Load(closureConfig);
             table.IgnoreClose = true;
+            engine.ObserveTableEnd(table.Handle);
             Flush();
             Application.DoEvents();
+            engine.ObserveTableEnd(table.Handle);
             Flush(2999);
             Application.DoEvents();
-            bool throttled = table.Visible && table.CloseMessages == 1;
+            bool throttled = table.CloseMessages == 1;
             table.IgnoreClose = false;
             Flush(3000);
             Application.DoEvents();
-            check("Options WinForms closes tracked table " + key,
-                waited && disabled && throttled && !table.Visible && table.CloseMessages == 2 && other.Visible &&
-                Exercise(caption, null, expectClose: false),
-                $"waited={waited} disabled={disabled} throttled={throttled} tableWM_CLOSE={table.CloseMessages}");
-            check("Options WinForms table signal uses original text comparison " + key,
-                rejectedTitleAndWrongCase && fullOrPrefix, "");
+            check("Options rendered table signal closes only its tracked window in layout mode",
+                cancelled && throttled && table.CloseMessages == 2 && !table.Visible && other.Visible, "");
         }
-        engine.SetClosureTables(Array.Empty<IntPtr>());
+
+        check("Options dismisses only the insufficient-chips notice with a unique OK button",
+            Exercise("Sisal", "OK", FlutterDialogButtonClass, expectClose: false, expectClick: true,
+                otherLabel: "You requested more chips than you\nhave available") &&
+            Exercise("Sisal", "OK", FlutterDialogButtonClass, expectClose: false,
+                otherLabel: "You requested more chips") &&
+            Exercise("Sisal", "Cancel", FlutterDialogButtonClass, expectClose: false,
+                otherLabel: InsufficientChipsText) &&
+            Exercise("Sisal", "OK", FlutterDialogButtonClass, expectClose: false,
+                otherLabel: InsufficientChipsText, otherButton: "OK", otherButtonClass: PokerStarsDialogButtonClass) &&
+            Exercise("Unrelated popup", "OK", FlutterDialogButtonClass, expectClose: false,
+                otherLabel: InsufficientChipsText), "");
+        check("Options identifies and separately enables the two rendered Sisal notices",
+            Exercise("Sisal", "OK", FlutterDialogButtonClass, expectClose: false, expectClick: true,
+                renderedNotice: SharedMemory.RenderedNotice.StackUpdate) &&
+            Exercise("Sisal", "OK", FlutterDialogButtonClass, expectClose: false, expectClick: true,
+                renderedNotice: SharedMemory.RenderedNotice.InsufficientChips) &&
+            Exercise("Sisal", "OK", FlutterDialogButtonClass, expectClose: false) &&
+            Exercise("Sisal", "OK", FlutterDialogButtonClass, expectClose: false,
+                renderedNotice: SharedMemory.RenderedNotice.StackUpdate, beforeDeadline: _ =>
+                {
+                    closureConfig.Set("PokerCaption", "DismissStackUpdate", 0);
+                    engine.Load(closureConfig);
+                }) &&
+            Exercise("Sisal", "OK", FlutterDialogButtonClass, expectClose: false, expectClick: true,
+                renderedNotice: SharedMemory.RenderedNotice.InsufficientChips), "");
+        check("Options layout mode keeps inactivity available",
+            Exercise(InactivityTitle, "Stay connected", PokerStarsDialogButtonClass, expectClose: false, expectClick: true,
+                otherButton: "Cancel") &&
+            Exercise(InactivityTitle, "Stay connected", FlutterDialogButtonClass, expectClose: false, expectClick: true) &&
+            Exercise(InactivityTitle, "Stay Connected", FlutterDialogButtonClass, expectClose: false) &&
+            Exercise(InactivityTitle, "Stay connected", FlutterDialogButtonClass, expectClose: false, recognized: false) &&
+            Exercise(InactivityTitle, "Stay connected", FlutterDialogButtonClass, expectClose: false,
+                otherButton: "Stay connected", otherButtonClass: PokerStarsDialogButtonClass) &&
+            Exercise(InactivityTitle, "Stay connected", FlutterDialogButtonClass, expectClose: false,
+                beforeDeadline: _ => engine.Load(new IniFile(null))), "");
+        engine._layoutOnly = false;
 
         var oldConfig = new IniFile(null);
         oldConfig.Set("AutoDialog", "Caption0", "TABLE CAP REACHED");
@@ -144,39 +175,15 @@ public sealed partial class AutoDialogEngine
         oldConfig.Set("AutoDialog", "Caption2", "This seat is occupied.");
         oldConfig.Set("AutoDialog", "Caption3", "My News");
         oldConfig.Set("AutoDialog", "Caption4", "table is closed");
+        oldConfig.Set("AutoDialog", "Caption5", "Options unrelated custom dialog");
         engine.Load(oldConfig);
-        check("Options WinForms legacy table cap rule is inert", Exercise("Table Cap Reached", null, expectClose: false), "");
-        check("Options WinForms legacy seat reserved rule is inert",
-            Exercise("This seat is reserved for players on the waiting list", null, expectClose: false), "");
-        check("Options WinForms legacy seat occupied rule is inert",
-            Exercise("This seat is occupied.", null, expectClose: false), "");
-        check("Options WinForms retired news rule is inert", Exercise("My News", null, expectClose: false), "");
-        check("Options WinForms legacy filtering preserves other rules", Exercise("table is closed", null), "");
-
-        foreach (var (key, title, buttonText) in ButtonOptions)
-        {
-            var config = new IniFile(null);
-            config.Set("PokerCaption", key, 1);
-            engine.Load(config);
-            check("Options WinForms clicks the exact dialog button " + key,
-                Exercise(title, buttonText, PokerStarsDialogButtonClass, expectClose: false, expectClick: true,
-                    otherButton: "Cancel") &&
-                Exercise(title, buttonText, FlutterDialogButtonClass, expectClose: false, expectClick: true), "");
-            check("Options WinForms rejects unsafe dialog targets " + key,
-                Exercise(title.ToLowerInvariant(), buttonText, PokerStarsDialogButtonClass, expectClose: false) &&
-                Exercise(title, buttonText.ToLowerInvariant(), PokerStarsDialogButtonClass, expectClose: false) &&
-                Exercise(title, buttonText, "Button", expectClose: false) &&
-                Exercise(title, buttonText, PokerStarsDialogButtonClass, expectClose: false, visibleChild: false) &&
-                Exercise(title, buttonText, PokerStarsDialogButtonClass, expectClose: false, recognized: false) &&
-                Exercise(title, buttonText, PokerStarsDialogButtonClass, expectClose: false,
-                    otherButton: buttonText, otherButtonClass: FlutterDialogButtonClass) &&
-                Exercise(title, buttonText, PokerStarsDialogButtonClass, expectClose: false,
-                    beforeDeadline: child => child.SetText("Different button")), "");
-            check("Options WinForms cancels dialog click when the flag is turned off " + key,
-                Exercise(title, buttonText, PokerStarsDialogButtonClass, expectClose: false,
-                    beforeDeadline: _ => engine.Load(new IniFile(null))) &&
-                Exercise(title, buttonText, FlutterDialogButtonClass, expectClose: false), "");
-        }
+        check("Options retired rules are inert and custom rules survive",
+            Exercise("Table Cap Reached", null, expectClose: false) &&
+            Exercise("This seat is reserved for players on the waiting list", null, expectClose: false) &&
+            Exercise("This seat is occupied.", null, expectClose: false) &&
+            Exercise("My News", null, expectClose: false) &&
+            Exercise("table is closed", null, expectClose: false) &&
+            Exercise("Options unrelated custom dialog", null), "");
 
         var waitingListConfig = new IniFile(null);
         waitingListConfig.Set("PokerCaption", "CloseTableWaitingList", 1);

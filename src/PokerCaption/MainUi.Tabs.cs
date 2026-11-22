@@ -29,9 +29,6 @@ namespace PokerCaption
         // (apply iniziale / load backup) gli eventi di cambio devono restare inerti
         private bool _tabsSync;
 
-        private sealed record DialogRule(CheckBox Box, string Caption);
-        private readonly List<DialogRule> _dialogRules = new List<DialogRule>();
-
         private static readonly (string Control, string Key, bool Default)[] OptionsFlags =
         {
             ("CheckBox34", "MinimizeToTray", true),
@@ -39,9 +36,9 @@ namespace PokerCaption
             ("neverSitOutLimit", "NeverSitOutLimit", false),
             ("CheckBox344", "CaptionAutoClose", false),
             ("CheckBox173", "CloseTableHasBeenClosed", false),
-            ("CheckBox316", "CurSessInfo", false),
-            ("CheckBox208", "KeepPlaying", false),
             ("CheckBox50", "InactivityTO", false),
+            ("dismissInsufficientChips", "DismissInsufficientChips", false),
+            ("dismissStackUpdate", "DismissStackUpdate", false),
         };
 
         public void WireTabs(Form f)
@@ -248,35 +245,7 @@ namespace PokerCaption
         }
 
         // ============================================================ DIALOGS
-        private void WireDialogs(Form f)
-        {
-            var page = WorkspacePageByName(f, "Options") ?? f;
-            var captionPattern = new Regex("^Close\\s+'(.+?)'", RegexOptions.Singleline);
-            foreach (var box in DesktopWindow.Descendants(page).OfType<CheckBox>())
-            {
-                var match = captionPattern.Match(box.Text.Trim());
-                if (!match.Success) continue;
-
-                var rule = new DialogRule(box, match.Groups[1].Value.Trim());
-                _dialogRules.Add(rule);
-                box.CheckedChanged += (_, _) =>
-                {
-                    if (_tabsSync) return;
-                    try { UpdateDialogRule(rule); }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                    {
-                        _tabsSync = true;
-                        try { box.Checked = !box.Checked; }
-                        finally { _tabsSync = false; }
-                        MessageBox.Show(f, ex.Message, "PokerCaption", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    }
-                };
-            }
-
-            Program.Service?.AutoDialog.SetOptionCaptions(_dialogRules.Select(rule => rule.Caption));
-            SyncDialogsFromIni();
-            Log("Dialogs: " + _dialogRules.Count + " checkbox collegate a [AutoDialog]");
-        }
+        private void WireDialogs(Form f) => SyncDialogsFromIni(WorkspacePageByName(f, "Options") ?? f);
 
         private static List<(string Caption, int Delay)> ReadDialogRules()
         {
@@ -289,9 +258,15 @@ namespace PokerCaption
             }
         }
 
-        private void SyncDialogsFromIni()
+        private void SyncDialogsFromIni(Control page)
         {
             var saved = ReadDialogRules();
+            bool legacyTableClosure = saved.RemoveAll(entry => AutoDialogEngine.IsLegacyTableCloseCaption(entry.Caption)) > 0;
+            if (legacyTableClosure)
+            {
+                Program.Ini.SaveChanges("PokerCaption", section => section["CloseTableHasBeenClosed"] = "1");
+                SyncOptionsFromIni(page);
+            }
             bool migrated = saved.RemoveAll(entry => AutoDialogEngine.IsRemovedOptionCaption(entry.Caption)) > 0;
             Program.Ini.Find("PokerCaption")?.Entries.RemoveAll(entry =>
                 entry.Key.Equals("FPafter", StringComparison.OrdinalIgnoreCase) ||
@@ -303,34 +278,7 @@ namespace PokerCaption
                 entry.Key.Equals("StarsAccountInfo", StringComparison.OrdinalIgnoreCase) ||
                 entry.Key.Equals("TrnyRegShowLobbyClose", StringComparison.OrdinalIgnoreCase) ||
                 entry.Key.Equals("WaitingListOk", StringComparison.OrdinalIgnoreCase));
-            var syncing = _tabsSync;
-            _tabsSync = true;
-            try
-            {
-                foreach (var rule in _dialogRules)
-                {
-                    var entry = saved.FirstOrDefault(x => string.Equals(x.Caption, rule.Caption, StringComparison.OrdinalIgnoreCase));
-                    rule.Box.Checked = entry.Caption != null;
-                }
-            }
-            finally { _tabsSync = syncing; }
-            if (migrated) WriteDialogRules(saved);
-        }
-
-        private static void UpdateDialogRule(DialogRule rule)
-        {
-            var rules = ReadDialogRules();
-            int index = rules.FindIndex(x => string.Equals(x.Caption, rule.Caption, StringComparison.OrdinalIgnoreCase));
-            if (rule.Box.Checked)
-            {
-                if (index < 0) rules.Add((rule.Caption, 0));
-            }
-            else
-            {
-                rules.RemoveAll(x => string.Equals(x.Caption, rule.Caption, StringComparison.OrdinalIgnoreCase));
-            }
-
-            WriteDialogRules(rules);
+            if (migrated || legacyTableClosure) WriteDialogRules(saved);
         }
 
         private static void WriteDialogRules(List<(string Caption, int Delay)> rules)

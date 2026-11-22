@@ -206,61 +206,13 @@ internal static class DesktopWindow
             Check("CheckBox344", "Close PokerCaption after the client closes")));
         contents.Controls.Add(Section("Table preferences", Check("neverSitOut", "Never sit out"),
             Row(Check("neverSitOutLimit", "Maximum"), Spin("neverSitOutMaximum", "Maximum", 1, 999, 3))));
-        contents.Controls.Add(Section("Table closure", Check("CheckBox173", "Auto close 'This table has been closed' tables")));
-
-        var dialogItems = DialogRules.Select(rule => Check(rule.name, $"Close '{rule.caption}'")).ToList();
-        foreach (var (name, caption) in new[]
-        {
-            ("CheckBox316", "Close Current Session Information"),
-            ("CheckBox208", "Keep playing in Current Session"), ("CheckBox50", "Stay connected on inactivity timeout")
-        }) dialogItems.Add(Check(name, caption));
-
-        var columns = new TableLayoutPanel
-        {
-            Name = "dialogColumns", Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, RowCount = 1,
-            Margin = Padding.Empty
-        };
-        columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        int splitAt = (dialogItems.Count + 1) / 2;
-        for (int i = 0; i < 2; i++)
-        {
-            var column = Stack();
-            column.Dock = DockStyle.Top;
-            column.Padding = new Padding(0, 0, 8, 0);
-            column.Controls.AddRange((i == 0 ? dialogItems.Take(splitAt) : dialogItems.Skip(splitAt)).ToArray());
-            columns.Controls.Add(column, i, 0);
-        }
-        var dialogs = new GroupBox
-        {
-            Text = "Dialogs", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Dock = DockStyle.Top, BackColor = Color.White, ForeColor = Ink, Padding = new Padding(12, 7, 12, 8)
-        };
-        dialogs.Controls.Add(columns);
-        contents.Controls.Add(dialogs);
-        scroll.ClientSizeChanged += (_, _) => FitDialogColumns();
-        FitDialogColumns();
+        contents.Controls.Add(Section("Table closure", Check("CheckBox173", "Automatically close finished tables")));
+        contents.Controls.Add(Section("Dialogs",
+            Check("CheckBox50", "Stay connected on inactivity timeout"),
+            Check("dismissInsufficientChips", "Close the insufficient chips notice"),
+            Check("dismissStackUpdate", "Close the stack update notice")));
         return page;
-
-        void FitDialogColumns()
-        {
-            int maxWidth = Math.Max(220, (scroll.ClientSize.Width - 46) / 2 - 20);
-            foreach (var box in dialogItems)
-            {
-                int checkWidth = box.GetPreferredSize(Size.Empty).Width -
-                    TextRenderer.MeasureText(box.Text, box.Font).Width;
-                int textHeight = TextRenderer.MeasureText(box.Text, box.Font,
-                    new Size(maxWidth - Math.Max(checkWidth, 20), int.MaxValue), TextFormatFlags.WordBreak).Height;
-                box.AutoSize = false;
-                box.Size = new Size(maxWidth, Math.Max(box.GetPreferredSize(Size.Empty).Height, textHeight + 4));
-            }
-        }
     }
-
-    private static readonly (string name, string caption)[] DialogRules =
-    [
-        ("CheckBox327", "table is closed"),
-    ];
 
     internal static Form CreateTagPicker()
     {
@@ -362,8 +314,8 @@ internal static class DesktopWindow
 
 
     private static NumericUpDown Spin(string name, string label, int min, int max, int value = 0) =>
-        new() { Name = name, AccessibleName = label, Minimum = min, Maximum = max, Width = 22,
-            ReadOnly = true, TabStop = false, Value = Math.Clamp(value, min, max) };
+        new() { Name = name, AccessibleName = label, Minimum = min, Maximum = max, Width = 66,
+            TextAlign = HorizontalAlignment.Right, Value = Math.Clamp(value, min, max) };
 
     private static CheckBox Check(string name, string label, bool value = false) =>
         new() { Name = name, Text = label, Checked = value, AutoSize = true, Margin = new Padding(4, 6, 8, 5) };

@@ -229,7 +229,7 @@ namespace PokerCaption
             {
                 _wheel?.Dispose();
                 _wheel = null;
-                Log("TM: solo layout; HUD e scansione attivi, statistiche sui pixel visibili, PrintWindow, rotellina e dialoghi automatici sospesi; BetScript su scansione");
+                Log("TM: solo layout; HUD e scansione attivi, statistiche sui pixel visibili, PrintWindow, rotellina e dialoghi generici sospesi; chiusura dei tavoli, avvisi di inattività e gettoni insufficienti e BetScript attivi se configurati");
             }
             else if (_wheel == null)
             {
@@ -303,7 +303,7 @@ namespace PokerCaption
             }
             else if (section.Equals("AutoDialog", StringComparison.OrdinalIgnoreCase))
             {
-                SyncDialogsFromIni();
+                SyncDialogsFromIni(WorkspacePageByName(Form, "Options") ?? Form);
                 service?.AutoDialog.Load(ini);
             }
             else if (section.Equals("HUD", StringComparison.OrdinalIgnoreCase) ||

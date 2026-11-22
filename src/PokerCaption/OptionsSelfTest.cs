@@ -25,7 +25,7 @@ namespace PokerCaption
 
                 var retiredOptions = new[] { ("CheckBox13", "AutoTimebank"), ("cbAutoHideChat", "AutoHideChat"), ("CheckBox14", "StartMinimized"),
                     ("CheckBox82", "CloseCantFound"), ("UpDown38", "CNFafter"),
-                    ("CheckBox401", "CloseTableHasConcluded"), ("CheckBox504", "CloseTournamentIsOver"), ("CheckBox283", "CloseTrnyLobby") };
+                    ("CheckBox316", "CurSessInfo"), ("CheckBox208", "KeepPlaying"), ("CheckBox401", "CloseTableHasConcluded"), ("CheckBox504", "CloseTournamentIsOver"), ("CheckBox283", "CloseTrnyLobby") };
                 foreach (var (control, key) in retiredOptions)
                 {
                     check("Options removed control " + control, Ctl(page, control) == null, "");
@@ -61,20 +61,8 @@ namespace PokerCaption
                 maximum.Value = 7;
                 var disk = IniFile.Load(optionsPath);
                 check("Options saves the optional per-table sit-out maximum immediately",
-                    initiallyOff && available && maximum.Enabled &&
+                    initiallyOff && available && maximum.Enabled && !maximum.ReadOnly && maximum.Width >= 60 &&
                     disk.GetBool(section, "NeverSitOutLimit", false) && disk.GetInt(section, "NeverSitOutMaximum") == 7, "");
-
-                check("Options dialog rule count", controller._dialogRules.Count == 1,
-                    controller._dialogRules.Count.ToString());
-                foreach (var rule in controller._dialogRules)
-                {
-                    bool initiallyDisabled = !rule.Box.Checked;
-                    rule.Box.Checked = true;
-                    bool writesRule = Program.Ini.Get("AutoDialog", "Caption0") == rule.Caption;
-                    rule.Box.Checked = false;
-                    check("Options dialog " + rule.Box.Name, rule.Box.Enabled && initiallyDisabled && writesRule &&
-                        Program.Ini.GetInt("AutoDialog", "Count", -1) == 0, rule.Caption);
-                }
 
                 var removed = new[]
                 {
@@ -98,20 +86,18 @@ namespace PokerCaption
                 Program.Ini.Set("AutoDialog", "Caption7", "PokerStars Logout Information");
                 Program.Ini.Set("AutoDialog", "Caption8", "You have been unregistered from");
                 Program.Ini.Set("AutoDialog", "Caption9", "table is closed");
-                Program.Ini.Set("AutoDialog", "Delay9", 17);
-                controller.SyncDialogsFromIni();
-                check("Options removed rules are purged and surviving delay is preserved",
+                Program.Ini.Set("AutoDialog", "Caption10", "Options unrelated custom dialog");
+                Program.Ini.Set("AutoDialog", "Delay10", 17);
+                controller.SyncDialogsFromIni(page);
+                check("Options migrates the legacy closure toggle and preserves custom rules",
                     removed.All(entry => Program.Ini.Get(section, entry.Item2) == null) &&
                     Program.Ini.GetInt("AutoDialog", "Count", -1) == 1 &&
-                    Program.Ini.Get("AutoDialog", "Caption0") == "table is closed" &&
+                    Program.Ini.Get("AutoDialog", "Caption0") == "Options unrelated custom dialog" &&
                     Program.Ini.GetInt("AutoDialog", "Delay0", -1) == 17 &&
                     Program.Ini.Get("AutoDialog", "Caption1") == null, "");
-                if (Ctl(page, "CheckBox327") is CheckBox closedTable) closedTable.Checked = false;
-
-                var columns = Ctl(page, "dialogColumns") as TableLayoutPanel;
-                check("Options dialog rules span two populated columns", columns is { ColumnCount: 2 } &&
-                    columns.Controls.Count == 2 && columns.Controls.Cast<Control>().All(column => column.Controls.Count > 0) &&
-                    columns.Controls.Cast<Control>().Sum(column => column.Controls.OfType<CheckBox>().Count()) == 4, "");
+                check("Options has one enabled control for all table closure signals",
+                    Ctl(page, "CheckBox327") == null && Ctl(page, "CheckBox173") is CheckBox { Checked: true } &&
+                    IniFile.Load(optionsPath).GetBool(section, "CloseTableHasBeenClosed", false), "");
 
                 check("Options Find a Player removed", Ctl(page, "CheckBox57") == null &&
                     Ctl(page, "Edit23") == null && Ctl(page, "UpDown45") == null, "");
@@ -121,11 +107,11 @@ namespace PokerCaption
                     "CheckBox506", "CheckBox500", "CheckBox313", "CheckBox312"];
                 string[] retiredKeys = ["WaitingListOk", "CloseMyNews", "StarsAccountInfo", "TrnyRegShowLobbyClose", "CloseLogoutInfo"];
                 foreach (string key in retiredKeys) Program.Ini.Set(section, key, 1);
-                controller.SyncDialogsFromIni();
+                controller.SyncDialogsFromIni(page);
                 check("Options retired dialog controls and legacy flags are removed",
                     retiredControls.All(name => Ctl(page, name) == null) &&
                     retiredKeys.All(key => Program.Ini.Get(section, key) == null), "");
-                Engine.AutoDialogEngine.CheckOptionsClosures(controller._dialogRules.Select(rule => rule.Caption), check);
+                Engine.AutoDialogEngine.CheckOptionsClosures(check);
                 CheckTrayAndAutosave(page, check);
             }
             finally

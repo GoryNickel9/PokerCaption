@@ -47,6 +47,9 @@ namespace PokerCaption.Native
         [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "SendMessageW")] public static extern IntPtr SendMessageSetText(IntPtr hWnd, uint msg, IntPtr wParam, string lParam);
         [DllImport("user32.dll")] public static extern bool IsChild(IntPtr hWndParent, IntPtr hWnd);
         [DllImport("user32.dll")] public static extern IntPtr SendMessageW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+        [DllImport("user32.dll", ExactSpelling = true)]
+        internal static extern IntPtr SendMessageTimeoutW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam,
+            uint flags, uint timeout, out UIntPtr result);
         [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
         [DllImport("user32.dll")] public static extern int GetWindowLongW(IntPtr hWnd, int index);
         [DllImport("user32.dll")] public static extern int SetWindowLongW(IntPtr hWnd, int index, int value);
@@ -142,6 +145,7 @@ namespace PokerCaption.Native
         // Messaggi privati consegnati al dispatcher dal hook WH_GETMESSAGE.
         public const uint MSG_DISPATCH  = 0x6742;
         public const uint MSG_TABLE_SCAN = 0x6743;
+        internal const uint MSG_READ_NOTICE = 0x6744;
 
         // tabella tavoli
         public const ulong SLOT_BASE    = 0x80578;
@@ -165,6 +169,8 @@ namespace PokerCaption.Native
     public sealed class SharedMemory : IDisposable
     {
         private int _scanId = Environment.TickCount;
+        private int _noticeId = Environment.TickCount;
+        internal enum RenderedNotice { None, InsufficientChips, StackUpdate }
         public enum ActionHookMode : byte { Default, SkipVisible, SkipAll, ProxyOnly = 4, WidgetOnly }
 
         public enum CocosScanStatus
@@ -195,6 +201,26 @@ namespace PokerCaption.Native
         public IntPtr View => _view;
 
         public unsafe void SetMainHwnd(IntPtr hwnd) => *(IntPtr*)(_base + SharedLayout.OFF_MAINHWND) = hwnd;
+
+        internal unsafe RenderedNotice ReadRenderedNotice(IntPtr window)
+        {
+            const int requestOffset = 0x90, resultOffset = 0x94, replyOffset = 0x98, windowOffset = 0x9C;
+            int id = Interlocked.Increment(ref _noticeId);
+            if (id == 0) id = Interlocked.Increment(ref _noticeId);
+            Volatile.Write(ref *(int*)(_base + replyOffset), 0);
+            Volatile.Write(ref *(int*)(_base + windowOffset), unchecked((int)window.ToInt64()));
+            Volatile.Write(ref *(int*)(_base + requestOffset), id);
+            const uint blockIncomingSends = 1, abortIfHung = 2, errorOnExit = 32;
+            try
+            {
+                if (NativeMethods.SendMessageTimeoutW(window, SharedLayout.MSG_READ_NOTICE, (IntPtr)id, IntPtr.Zero,
+                    blockIncomingSends | abortIfHung | errorOnExit, 40, out _) == IntPtr.Zero ||
+                    Volatile.Read(ref *(int*)(_base + replyOffset)) != id)
+                    return RenderedNotice.None;
+                return (RenderedNotice)Volatile.Read(ref *(int*)(_base + resultOffset));
+            }
+            finally { Volatile.Write(ref *(int*)(_base + requestOffset), 0); }
+        }
 
         /// <summary>Scrive comando+indice e posta il trigger al main. Ritorna true se il PostMessage è accettato.</summary>
         public unsafe bool SendCommand(int cmd, int tableIndex, byte flag = 0)
@@ -263,6 +289,14 @@ namespace PokerCaption.Native
         }
 
         internal void EnableBackDetection(int slot, bool enabled) => SetSlotFlag(slot, 0x19D5, enabled ? (byte)1 : (byte)0);
+
+        internal void EnableTableEndDetection(int slot, bool enabled) => SetSlotFlag(slot, 0x19D7, enabled ? (byte)1 : (byte)0);
+
+        internal unsafe bool ReadTableEnd(int slot)
+        {
+            var p = (byte*)SlotAddress(_base, slot);
+            return p != null && p[0x19FC] != 0;
+        }
 
         internal unsafe Point? ReadBackPosition(int slot)
         {
@@ -341,6 +375,7 @@ namespace PokerCaption.Native
             {
                 *(int*)(p + 0x19D4) = 0;
                 *(int*)(p + 0x19E0) = 0;
+                p[0x19FC] = 0;
                 *(int*)(p + 0x27D4) = 0;
                 *(int*)(p + 0x27D8) = 0;
                 *(int*)(p + ActionCaptureOffset) = 0;

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
@@ -122,18 +122,58 @@ namespace PokerCaption.Engine
         private static bool FocusBetBox(IntPtr hwnd, double nx, double ny) =>
             TryPoint(hwnd, nx, ny, out var point, foregroundOnly: true) && ClickForegroundAt(hwnd, point);
 
-        internal static bool ClickForegroundClientPoint(IntPtr hwnd, Point clientPoint)
+        internal static bool ClickSitOutButton(IntPtr hwnd, Point clientPoint, out bool foregroundRestored)
         {
+            foregroundRestored = true;
             var point = new NativeMethods.POINT { X = clientPoint.X, Y = clientPoint.Y };
-            return NativeMethods.GetClientRect(hwnd, out var client) &&
-                point.X > 0 && point.X < client.Right && point.Y > 0 && point.Y < client.Bottom &&
-                NativeMethods.ClientToScreen(hwnd, ref point) && ClickForegroundAt(hwnd, point);
+            if (!NativeMethods.IsWindowVisible(hwnd) || IsIconic(hwnd) || IsHungAppWindow(hwnd) ||
+                Control.MouseButtons != MouseButtons.None || NativeMethods.IsInMoveSize(hwnd) ||
+                !NativeMethods.GetClientRect(hwnd, out var client) ||
+                point.X <= 0 || point.X >= client.Right || point.Y <= 0 || point.Y >= client.Bottom ||
+                !NativeMethods.ClientToScreen(hwnd, ref point) || !OwnsPoint(hwnd, point))
+                return false;
+
+            var previous = NativeMethods.GetForegroundWindow();
+            if (previous == hwnd) return ClickForegroundAt(hwnd, point, requireCursorOverWindow: false);
+            if (previous == IntPtr.Zero || NativeMethods.IsInMoveSize(previous) ||
+                !NativeMethods.GetCursorPos(out var cursor) || !SetForegroundWindow(hwnd))
+                return false;
+
+            try
+            {
+                if (!WaitForForeground(hwnd, previous) || Control.MouseButtons != MouseButtons.None ||
+                    !NativeMethods.GetCursorPos(out var current) || current.X != cursor.X || current.Y != cursor.Y ||
+                    !ClickForegroundAt(hwnd, point, requireCursorOverWindow: false))
+                    return false;
+                // Give the table a frame to process the button release before deactivation.
+                Thread.Sleep(35);
+                return true;
+            }
+            finally
+            {
+                if (NativeMethods.GetForegroundWindow() == hwnd)
+                    foregroundRestored = SetForegroundWindow(previous) && WaitForForeground(previous, hwnd);
+            }
         }
 
-        private static bool ClickForegroundAt(IntPtr hwnd, NativeMethods.POINT point)
+        private static bool WaitForForeground(IntPtr target, IntPtr previous)
+        {
+            // Windows can hand off activation asynchronously between UI threads.
+            var deadline = Environment.TickCount64 + 60;
+            do
+            {
+                var active = NativeMethods.GetForegroundWindow();
+                if (active == target) return true;
+                if (active != IntPtr.Zero && active != previous) return false;
+                Thread.Sleep(5);
+            } while (Environment.TickCount64 < deadline);
+            return NativeMethods.GetForegroundWindow() == target;
+        }
+
+        private static bool ClickForegroundAt(IntPtr hwnd, NativeMethods.POINT point, bool requireCursorOverWindow = true)
         {
             if (NativeMethods.GetForegroundWindow() != hwnd || !OwnsPoint(hwnd, point) ||
-                !NativeMethods.GetCursorPos(out var original) || !OwnsPoint(hwnd, original) ||
+                !NativeMethods.GetCursorPos(out var original) || (requireCursorOverWindow && !OwnsPoint(hwnd, original)) ||
                 NativeMethods.IsInMoveSize(hwnd)) return false;
 
             // Queue focus and restoration together. A physical input event cannot enter the batch.

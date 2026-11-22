@@ -227,6 +227,16 @@ namespace PokerCaption
                 first.Presses == 1 && second.Presses == 1 && !first.Confirmed && !second.Confirmed &&
                 before.X == after.X && before.Y == after.Y &&
                 foreground == Native.NativeMethods.GetForegroundWindow(), $"posted={posted}, first={first.Amount}/{first.Presses}, second={second.Amount}/{second.Presses}");
+            var background = foreground == first.Handle ? second : first;
+            var untouched = ReferenceEquals(background, first) ? second : first;
+            int previousClicks = background.Presses;
+            bool delivered = CoordsEngine.ClickSitOutButton(background.Handle, new System.Drawing.Point(150, 100), out bool restored);
+            Application.DoEvents();
+            Native.NativeMethods.GetCursorPos(out var afterSitOut);
+            check("Never sit out skips an obscured button and leaves the cursor untouched",
+                !delivered && restored && background.Presses == previousClicks && untouched.Presses == 1 &&
+                after.X == afterSitOut.X && after.Y == afterSitOut.Y &&
+                foreground == Native.NativeMethods.GetForegroundWindow(), "");
         }
 
         private sealed class AmountInputFixture : Form

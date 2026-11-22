@@ -51,7 +51,7 @@ namespace PokerCaption.Engine
             _diagnosticHookMode = diagnosticHookMode;
             Betscript = new BetScriptEngine(_log);
             Manager = new TableManagerEngine(_log);
-            AutoDialog = new AutoDialogEngine(_log);
+            AutoDialog = new AutoDialogEngine(_log, shared == null ? null : shared.ReadRenderedNotice);
             Hud = new HudEngine(_log);
             GenHud = new GenHud(_log);
             Pixels = new PixelWatcher();
@@ -114,7 +114,7 @@ namespace PokerCaption.Engine
             };
             _hudTimer.Start();
             SafeTick();
-            if (!Manager.LayoutOnly) AutoDialog.Start();
+            AutoDialog.Start(layoutOnly: Manager.LayoutOnly);
 
             // pixel-watch su thread dedicato (niente jank UI)
             _pixelRun = true;
@@ -128,13 +128,7 @@ namespace PokerCaption.Engine
         internal void RefreshClientWork()
         {
             if (_timer == null) return;
-            if (Manager.LayoutOnly)
-            {
-                AutoDialog.Stop();
-                return;
-            }
-
-            AutoDialog.Start();
+            AutoDialog.Start(layoutOnly: Manager.LayoutOnly);
         }
 
         public void Stop()
@@ -221,7 +215,7 @@ namespace PokerCaption.Engine
             }
 
             _pixelTables = _tables.ToArray();
-            if (!Manager.LayoutOnly) AutoDialog.SetClosureTables(_tables.Select(table => table.Hwnd));
+            AutoDialog.SetClosureTables(_tables.Select(table => table.Hwnd));
 
             foreach (var t in _tables)
             {
@@ -246,6 +240,7 @@ namespace PokerCaption.Engine
         private void ScanHud()
         {
             bool updated = false;
+            bool detectTableEnd = Manager.RenderedClient && AutoDialog.CloseTableHasBeenClosed;
             foreach (var t in _tables)
             {
                 if (t.Slot < 0) continue;
@@ -255,6 +250,7 @@ namespace PokerCaption.Engine
                     updated = true;
                 }
                 t.BetScriptScanTurn = t.HeroAct ? t.BetScriptTurn : -1;
+                _shared.EnableTableEndDetection(t.Slot, detectTableEnd);
                 t.PendingScanId = _shared.RequestTableScan(t.ClientThreadId, t.Slot);
             }
             if (updated && Hud.Active) Hud.OnTick(_tables);
@@ -269,6 +265,8 @@ namespace PokerCaption.Engine
         {
             var texts = _shared.ReadTableTexts(t.Slot);
             var (nodes, labels, cocosBound, scanStatus, viewApi) = _shared.ReadTableDiag(t.Slot);
+            if (Manager.RenderedClient && scanStatus == SharedMemory.CocosScanStatus.Walked && _shared.ReadTableEnd(t.Slot))
+                AutoDialog.ObserveTableEnd(t.Hwnd);
             if (++_diagCycles % 8 == 1)
             {
                 string preview = string.Join(" | ", texts.Take(3).Select(x => (x.node.Length > 0 ? x.node + "=" : "") + x.text));
@@ -387,15 +385,22 @@ namespace PokerCaption.Engine
             var position = _shared.ReadBackPosition(table.Slot);
             var tracker = table.SitOutTracker ??= new NeverSitOut();
             bool canResume = tracker.ShouldResume(backVisible, table.HeroAct || (table.HeroInHand && !table.HeroSampleUnavailable), DateTime.UtcNow,
-                since => position.HasValue && NativeMethods.GetForegroundWindow() == table.Hwnd &&
-                    NeverSitOut.HasRecentTimeout(table, since), _neverSitOutMaximum,
+                since => position.HasValue && NeverSitOut.HasRecentTimeout(table, since), _neverSitOutMaximum,
                 (SitOutIntent)_shared.ReadSitOutIntent(table.Slot), table.HeroAct, NativeMethods.ReadLastInputTick());
-            if (canResume && position is { } point && !Manager.IsMoving(table) &&
-                CoordsEngine.ClickForegroundClientPoint(table.Hwnd, point))
+            if (canResume && position is { } point && !Manager.IsMoving(table))
             {
+                bool background = NativeMethods.GetForegroundWindow() != table.Hwnd;
+                bool clicked = CoordsEngine.ClickSitOutButton(table.Hwnd, point, out bool foregroundRestored);
+                if (!foregroundRestored)
+                {
+                    tracker.MarkResumed();
+                    _log($"Never sit out: Windows non ha ripristinato il primo piano dopo il tentativo su '{table.TableName}'");
+                    return;
+                }
+                if (!clicked) return;
                 tracker.MarkResumed();
                 string source = tracker.EarlySignal ? "transizione al sit-out" : "timeout nella cronologia";
-                _log($"Never sit out: richiesta di rientro su '{table.TableName}' tramite {source}");
+                _log($"Never sit out: richiesta di rientro su '{table.TableName}' tramite {source}{(background ? " (secondo piano)" : "")}");
             }
         }
 

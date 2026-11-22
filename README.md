@@ -11,7 +11,7 @@ PokerCaption è un’applicazione desktop Windows per disporre le finestre dei t
 | **BetScript** | Applica la prima formula utilizzabile per la street corrente. Le formule sono espressioni numeriche del profilo e usano valori disponibili come piatto, buio, stack e importo da chiamare. Il motore compila il campo una volta per turno riconosciuto. La conferma della puntata resta al giocatore. |
 | **Rotellina e dialoghi** | La rotellina può variare l’importo. Le regole abilitate per i dialoghi possono chiudere finestre selezionate o attivare pulsanti specifici. Queste funzioni hanno percorsi distinti da BetScript. |
 
-BetScript resta disponibile con Table Manager acceso. Sul client renderizzato usa lo stato delle azioni acquisito dalla scansione, richiede dati sufficienti dello stesso turno e rimanda la compilazione finché la finestra si sposta. Ogni tavolo ha un turno di precompilazione indipendente. Sul tavolo in primo piano e sotto il cursore il motore può usare l’input di Windows, ripristinando la posizione del mouse. Negli altri casi invia l’importo alla singola finestra, senza portarla in primo piano o spostare il cursore. Se la formula richiede dati assenti o non applicabili, il motore prova la regola successiva o lascia il campo com’è. Su Sisal, quando Table Manager è attivo, PokerCaption sospende la propria funzione che cambia l’importo con la rotellina e il motore che gestisce i dialoghi automatici. La rotellina del client continua a funzionare normalmente. Viene sospesa anche la cattura `PrintWindow`. Restano attivi la scansione nativa, l’HUD, il campionamento di pixel visibili per le statistiche e BetScript.
+BetScript resta disponibile con Table Manager acceso. Sul client renderizzato usa lo stato delle azioni acquisito dalla scansione, richiede dati sufficienti dello stesso turno e rimanda la compilazione finché la finestra si sposta. Ogni tavolo ha un turno di precompilazione indipendente. Sul tavolo in primo piano e sotto il cursore il motore può usare l’input di Windows, ripristinando la posizione del mouse. Negli altri casi invia l’importo alla singola finestra, senza portarla in primo piano o spostare il cursore. Se la formula richiede dati assenti o non applicabili, il motore prova la regola successiva o lascia il campo com’è. Su Sisal, quando Table Manager è attivo, PokerCaption sospende la propria funzione che cambia l’importo con la rotellina e le azioni automatiche sui dialoghi, salvo la chiusura dei tavoli conclusi e la gestione degli avvisi di inattività, gettoni insufficienti e aggiornamento dello stack. La rotellina del client continua a funzionare normalmente. Viene sospesa anche la cattura `PrintWindow`. Restano attivi la scansione nativa, l’HUD, il campionamento di pixel visibili per le statistiche e BetScript.
 
 ## Architettura e flusso dei dati
 
@@ -61,19 +61,11 @@ Le formule supportano operatori aritmetici, parentesi e il suffisso `bb` per esp
 | Gruppo | Controlli |
 | --- | --- |
 | **Application** | **Minimize to tray** nasconde la finestra principale nell’area di notifica quando viene minimizzata. **Close PokerCaption after the client closes** chiude PokerCaption dopo che l’ultima lobby o finestra tavolo è sparita. La funzione si attiva dopo il primo client rilevato. |
-| **Table preferences** | **Never sit out** è la preferenza unica per cash e tornei. Su Sisal osserva le caselle di sit-out prima della comparsa di **I’m Back**. Se durante il turno la casella del sit-out risulta vuota e il pulsante compare subito dopo senza input dell’utente, tenta il rientro usando la transizione. Una pausa selezionata viene rispettata. Quando la transizione è ambigua, cerca il marcatore `has timed out` per Hero nella cronologia scritta a fine mano. Il tavolo deve essere in primo piano e sotto il cursore. La conferma a fine mano richiede la cronologia locale di Sisal. Se attivi **Maximum**, scegli da 1 a 999 tentativi automatici per ciascun tavolo. Il contatore si azzera quando chiudi il relativo tavolo. |
-| **Table closure** | **Auto close ‘This table has been closed’ tables** chiude il tavolo associato a un avviso che lo dichiara chiuso. |
+| **Table preferences** | **Never sit out** è la preferenza unica per cash e tornei. Su Sisal osserva le caselle di sit-out prima della comparsa di **I’m Back**. Se durante il turno la casella del sit-out risulta vuota e il pulsante compare subito dopo senza input dell’utente, tenta il rientro usando la transizione. Una pausa selezionata viene rispettata. Quando la transizione è ambigua, cerca il marcatore `has timed out` per Hero nella cronologia scritta a fine mano. Il pulsante deve essere scoperto. Se il tavolo è in secondo piano, PokerCaption chiede a Windows di attivarlo per il clic e di ripristinare subito dopo la finestra precedente. Se Windows nega l’attivazione, il tentativo viene rimandato. Il cursore torna al punto da cui è partito. La conferma a fine mano richiede la cronologia locale di Sisal. Se attivi **Maximum**, scegli da 1 a 999 tentativi automatici per ciascun tavolo. Il contatore si azzera quando chiudi il relativo tavolo. |
+| **Table closure** | **Automatically close finished tables** chiude il tavolo quando la scansione rileva l’avviso di chiusura o il conto alla rovescia sotto i 15 secondi. Chiude anche il popup di tavolo chiuso e il tavolo associato, se ancora aperto. Funziona in primo e in secondo piano, anche con Table Manager attivo. |
+| **Dialogs** | **Stay connected on inactivity timeout** preme il pulsante per mantenere la connessione quando compare l’avviso di inattività. **Close the insufficient chips notice** preme **OK** nel popup di Sisal con il messaggio “You requested more chips than you have available”. **Close the stack update notice** preme **OK** quando Sisal avvisa che aggiornerà lo stack a fine mano. Le tre opzioni sono disponibili con Table Manager attivo. Per gli avvisi disegnati nel popup il modulo nativo verifica il tipo di finestra e la build di Sisal prima di confrontare il testo. Alla parte gestita passa il tipo di avviso, senza salvare il testo o catturare immagini. |
 
-In **Dialogs** ogni voce lavora sul dialogo riconosciuto. Le opzioni di chiusura hanno questi ambiti.
-
-| Voci | Risultato |
-| --- | --- |
-| **table is closed** | Chiude il dialogo che segnala la chiusura del tavolo. |
-| **Close Current Session Information** | Preme **Close** nella finestra informativa della sessione corrente. |
-| **Keep playing in Current Session** | Preme **Keep Playing** nella finestra che chiede se si vuole continuare la sessione corrente. |
-| **Stay connected on inactivity timeout** | Preme il pulsante per mantenere la connessione quando compare l’avviso di inattività. |
-
-Le azioni sui dialoghi dipendono dal titolo, dal testo o dalla struttura del dialogo riconosciuto. Sul client renderizzato sono sospese mentre Table Manager è attivo. Le preferenze dei menu vengono salvate quando si modificano e applicate dopo la scrittura, con una copia del file precedente. **Language**, in **Options**, cambia subito la lingua della finestra principale e della configurazione dei simboli. Le formule, i tag e i messaggi ricevuti dal client conservano la loro sintassi. Il programma si apre sempre sulla pagina **HUD**. Nell’area di notifica, **Mostra** riapre la finestra, **Config INI…** apre l’editor locale delle impostazioni e **Esci** chiude l’applicazione.
+Le preferenze dei menu vengono salvate quando si modificano e applicate dopo la scrittura, con una copia del file precedente. **Language**, in **Options**, cambia subito la lingua della finestra principale e della configurazione dei simboli. Le formule, i tag e i messaggi ricevuti dal client conservano la loro sintassi. Il programma si apre sempre sulla pagina **HUD**. Nell’area di notifica, **Mostra** riapre la finestra, **Config INI…** apre l’editor locale delle impostazioni e **Esci** chiude l’applicazione.
 
 ## Processi, privilegi e confini di fiducia
 
@@ -95,19 +87,6 @@ I dati sono salvati accanto all’eseguibile. Il processo deve poter scrivere ne
 | `tablesnap/`, `snap_result.txt`, `scan_client.txt` e report di test | Output delle funzioni diagnostiche esplicite. Le acquisizioni possono mostrare informazioni visibili sul tavolo. I report dei test usano invece dati sintetici. |
 
 Trattare log e acquisizioni come dati potenzialmente identificativi. Questa revisione riguarda il codice e la build indicata, con le impostazioni e il profilo effettivamente usati. Verificare la conformità delle singole funzioni alle regole dell’ambiente prima di collegare l’applicazione, incluse le funzioni di temporizzazione e di input automatico.
-
-## Compilazione e verifica riproducibile
-
-Su Windows servono .NET SDK 8, il runtime .NET Desktop 8 x86 per eseguire l’app e Zig disponibile in `PATH`. Dalla radice del repository, in una sessione desktop interattiva:
-
-```powershell
-.\build.cmd
-Set-Location .\src\PokerCaption\bin\Release\net8.0-windows
-.\PokerCaption.exe --ui-preview
-.\PokerCaption.exe --selftest2
-```
-
-`--ui-preview` apre l’interfaccia senza collegarsi al client. `--selftest2` usa finestre di prova locali, verifica fra l’altro layout, rendering, formule e dialoghi, e scrive `selftest2.txt`. Per verificare l’esecuzione reale usare un profilo di test, registrare la versione del client e separare le prove di sola disposizione finestre da quelle di acquisizione e di input.
 
 ## Punti di ingresso per la revisione del codice
 

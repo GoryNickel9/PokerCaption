@@ -12,21 +12,24 @@ namespace PokerCaption.Engine
     /// <summary>Gestisce le azioni sui dialoghi e le chiusure dei tavoli dei client riconosciuti.</summary>
     public sealed partial class AutoDialogEngine
     {
-        [Flags]
-        private enum TableCloseReason { None = 0, Closed = 1 }
-
-        private sealed record DialogAction(string Caption, int DelayMs, TableCloseReason TableReason = TableCloseReason.None);
-        private sealed record TableCloseRequest(uint ProcessId, TableCloseReason Reasons, long? LastPostTick);
+        private sealed record DialogAction(string Caption, int DelayMs, bool ClosesTable = false);
+        private sealed record TableCloseRequest(uint ProcessId, long? LastPostTick);
         private sealed record PendingClose(IntPtr Window, uint Owner, string Title, string WindowClass, bool IsDialog, DialogAction Action, long DueTick)
         {
             public string Body { get; init; }
             public IntPtr Button { get; init; }
         }
 
-        private static readonly DialogAction TableClosed = new("This table has been closed", 0, TableCloseReason.Closed);
+        private static readonly DialogAction TableClosed = new("Table closed", 0, ClosesTable: true);
+        private static readonly DialogAction InsufficientChips = new("Insufficient chips", 0);
+        private static readonly DialogAction StackUpdate = new("Stack update", 0);
+        private const string InsufficientChipsText = "You requested more chips than you have available";
+        private const string StackUpdateText = "Your stack will be updated when the current hand is finished";
+        private const string ConcludedText = "Play at this table has concluded";
         private const string PokerStarsDialogButtonClass = "PokerStarsButtonClass";
         private const string FlutterDialogButtonClass = "FlutterOnlinePokerButtonClass";
         private const string NativeDialogClass = "#32770";
+        private const string InactivityTitle = "Inactivity Timeout";
         private const uint WmGetText = 0x000D;
         private const uint WmMouseMove = 0x0200, WmLeftButtonDown = 0x0201, WmLeftButtonUp = 0x0202;
         private static readonly IntPtr ClickPoint = (IntPtr)0x000A000A;
@@ -56,28 +59,27 @@ namespace PokerCaption.Engine
             "You have been successfully removed from all the waiting lists",
             "You reached the cap of cash game tables", "You are playing at too many tables",
             "You are currently playing the maximum allowed Zoom tables at once",
-        };
-        private static readonly (string Key, string Title, string Button)[] ButtonOptions =
-        {
-            ("CurSessInfo", "Current Session Information", "Close"),
-            ("KeepPlaying", "Current Session", "Keep Playing"),
-            ("InactivityTO", "Inactivity Timeout", "Stay connected"),
+            "Current Session Information", "Current Session",
         };
 
         internal static bool IsRemovedOptionCaption(string caption) =>
             RemovedOptionCaptions.Contains(Normalize(caption).TrimEnd('.', '!', '?'));
+        internal static bool IsLegacyTableCloseCaption(string caption) =>
+            SameTitle(Normalize(caption), "table is closed");
 
         private readonly List<DialogAction> _rules = new();
-        private readonly Dictionary<string, string> _dialogButtons = new(StringComparer.Ordinal);
         private readonly List<PendingClose> _pending = new();
         private HashSet<IntPtr> _closureTables = new();
         private readonly Dictionary<IntPtr, TableCloseRequest> _tableClosures = new();
-        private readonly Dictionary<string, string> _optionCaptions = new(StringComparer.OrdinalIgnoreCase);
         private readonly object _state = new();
         private readonly Action<string> _log;
         private readonly Func<IntPtr, IntPtr> _lastActivePopup;
         private readonly Func<IntPtr, string> _windowClass;
-        public bool CloseTableHasBeenClosed;
+        private readonly Func<IntPtr, SharedMemory.RenderedNotice> _readRenderedNotice;
+        internal volatile bool CloseTableHasBeenClosed;
+        private bool _stayConnected;
+        private bool _dismissInsufficientChips;
+        private bool _dismissStackUpdate;
 
         private DateTime _lastScan = DateTime.MinValue;
         private DateTime _lastPidRefresh = DateTime.MinValue;
@@ -85,19 +87,26 @@ namespace PokerCaption.Engine
         private System.Windows.Forms.Timer _timer;
         private Task _poll;
         private int _runRevision, _configRevision;
+        private bool _layoutOnly;
 
-        public AutoDialogEngine(Action<string> log) : this(log, GetLastActivePopup, TableScanner.GetClass) { }
+        public AutoDialogEngine(Action<string> log) : this(log, null) { }
 
-        private AutoDialogEngine(Action<string> log, Func<IntPtr, IntPtr> lastActivePopup, Func<IntPtr, string> windowClass)
+        internal AutoDialogEngine(Action<string> log, Func<IntPtr, SharedMemory.RenderedNotice> readRenderedNotice)
+            : this(log, GetLastActivePopup, TableScanner.GetClass, readRenderedNotice) { }
+
+        private AutoDialogEngine(Action<string> log, Func<IntPtr, IntPtr> lastActivePopup, Func<IntPtr, string> windowClass,
+            Func<IntPtr, SharedMemory.RenderedNotice> readRenderedNotice = null)
         {
             _log = log ?? (_ => { });
             _lastActivePopup = lastActivePopup;
             _windowClass = windowClass;
+            _readRenderedNotice = readRenderedNotice;
         }
 
-        internal void Start()
+        internal void Start(bool layoutOnly = false)
         {
             Stop();
+            lock (_state) _layoutOnly = layoutOnly;
             _timer = new System.Windows.Forms.Timer { Interval = PollIntervalMs };
             _timer.Tick += (_, _) =>
             {
@@ -134,16 +143,6 @@ namespace PokerCaption.Engine
             }
         }
 
-        internal void SetOptionCaptions(IEnumerable<string> captions)
-        {
-            lock (_state)
-            {
-                _configRevision++;
-                _optionCaptions.Clear();
-                foreach (string caption in captions) _optionCaptions[caption] = caption;
-            }
-        }
-
         public void Load(IniFile ini)
         {
             lock (_state)
@@ -160,40 +159,35 @@ namespace PokerCaption.Engine
             {
                 var caption = ini.Get("AutoDialog", "Caption" + i);
                 if (caption == null) break;
-                if (string.IsNullOrWhiteSpace(caption) || IsRemovedOptionCaption(caption)) continue;
+                if (string.IsNullOrWhiteSpace(caption) || IsRemovedOptionCaption(caption) || IsLegacyTableCloseCaption(caption)) continue;
                 int delay = Math.Max(0, ini.GetInt("AutoDialog", "Delay" + i, 0));
                 _rules.Add(new DialogAction(caption.Trim(), delay));
             }
             CloseTableHasBeenClosed = ini.GetBool("PokerCaption", "CloseTableHasBeenClosed", false);
-            _dialogButtons.Clear();
-            foreach (var (key, title, button) in ButtonOptions)
-                if (ini.GetBool("PokerCaption", key, false)) _dialogButtons.Add(title, button);
+            if (!CloseTableHasBeenClosed) _tableClosures.Clear();
+            _stayConnected = ini.GetBool("PokerCaption", "InactivityTO", false);
+            _dismissInsufficientChips = ini.GetBool("PokerCaption", "DismissInsufficientChips", false);
+            _dismissStackUpdate = ini.GetBool("PokerCaption", "DismissStackUpdate", false);
             _pending.RemoveAll(entry => entry.Button != IntPtr.Zero
-                ? !_dialogButtons.ContainsKey(entry.Title)
-                : entry.Action.TableReason == TableCloseReason.None && (entry.Body == null
-                ? MatchDialog(entry.Title, entry.IsDialog)
+                ? entry.Action == InsufficientChips ? !_dismissInsufficientChips
+                    : entry.Action == StackUpdate ? !_dismissStackUpdate : !_stayConnected
+                : entry.Action.ClosesTable ? !CloseTableHasBeenClosed : (entry.Body == null
+                ? MatchDialog(entry.Title)
                 : MatchBody(entry.Body, entry.IsDialog)) != entry.Action);
         }
 
-        private DialogAction MatchDialog(string title, bool isDialog)
+        private DialogAction MatchDialog(string title)
         {
             if (string.IsNullOrWhiteSpace(title)) return null;
-            return _rules.FirstOrDefault(rule => _optionCaptions.TryGetValue(rule.Caption, out var caption)
-                ? isDialog && SameTitle(Normalize(title), caption)
-                : title.Contains(rule.Caption, StringComparison.OrdinalIgnoreCase));
+            return _rules.FirstOrDefault(rule => title.Contains(rule.Caption, StringComparison.OrdinalIgnoreCase));
         }
 
-        private DialogAction MatchBody(string body, bool isDialog, bool tableMessage = false)
+        private DialogAction MatchBody(string body, bool isDialog)
         {
             if (!isDialog || string.IsNullOrWhiteSpace(body)) return null;
             string text = Normalize(body);
-            if (tableMessage)
-            {
-                if (body == TableClosed.Caption) return TableClosed;
-            }
-
-            return _rules.FirstOrDefault(rule =>
-                _optionCaptions.TryGetValue(rule.Caption, out var caption) && SameTitle(text, caption));
+            if (CloseTableHasBeenClosed && IsTableEndText(text)) return TableClosed;
+            return null;
         }
 
         private static string Normalize(string text) => Whitespace.Replace(text.Trim(), " ");
@@ -201,21 +195,30 @@ namespace PokerCaption.Engine
         private static bool SameTitle(string title, string expected) =>
             string.Equals(title.Trim().TrimEnd('.', '!', '?'), expected.TrimEnd('.', '!', '?'), StringComparison.OrdinalIgnoreCase);
 
+        private static bool IsTableEndText(string text) =>
+            IsLegacyTableCloseCaption(text) || SameTitle(text, "This table has been closed") ||
+            SameTitle(text, ConcludedText) || text.StartsWith(ConcludedText + " ", StringComparison.OrdinalIgnoreCase);
+
         private PendingClose ReadDialog(IntPtr window, uint owner, long tickCount)
         {
             string title = WindowTitle(window);
             string windowClass = _windowClass(window);
             bool isDialog = IsDialogWindow(window, owner, windowClass);
             string buttonText = null;
-            bool tableMessage;
+            bool checkSisalNotice, checkChips, checkStackUpdate;
             lock (_state)
             {
-                tableMessage = isDialog && _closureTables.Contains(GetWindow(window, OwnerWindow));
-                var action = MatchDialog(title, isDialog);
+                var action = CloseTableHasBeenClosed && isDialog && IsTableEndText(Normalize(title))
+                    ? TableClosed : _layoutOnly ? null : MatchDialog(title);
                 if (action != null)
                     return new PendingClose(window, owner, title, windowClass, isDialog, action, tickCount + action.DelayMs);
-                if (windowClass == NativeDialogClass) _dialogButtons.TryGetValue(title, out buttonText);
-                if (!isDialog || (_rules.Count == 0 && !tableMessage && buttonText == null)) return null;
+                if (_stayConnected && windowClass == NativeDialogClass && title == InactivityTitle)
+                    buttonText = "Stay connected";
+                checkChips = _dismissInsufficientChips && windowClass == NativeDialogClass && title == "Sisal";
+                checkStackUpdate = _dismissStackUpdate && windowClass == NativeDialogClass && title == "Sisal";
+                checkSisalNotice = checkChips || checkStackUpdate;
+                if (!isDialog || (!CloseTableHasBeenClosed && buttonText == null && !checkSisalNotice))
+                    return null;
             }
 
             if (buttonText != null)
@@ -227,29 +230,47 @@ namespace PokerCaption.Engine
 
             // This rule also checks the text of the dialog's child controls.
             PendingClose match = null;
+            bool ambiguous = false;
             int labels = 0;
             NativeMethods.EnumChildWindows(window, (child, _) =>
             {
                 string childClass = TableScanner.GetClass(child);
-                if (childClass != "Static" || !NativeMethods.IsWindowVisible(child)) return true;
+                if ((!checkSisalNotice && childClass != "Static") ||
+                    !NativeMethods.IsWindowVisible(child) || !HasProcess(child, owner)) return true;
                 if (++labels > MaxDialogLabels || !TryReadControlText(child, out var text))
                 {
-                    match = null;
+                    ambiguous = true;
                     return false;
                 }
                 DialogAction candidate;
-                lock (_state) candidate = MatchBody(text, isDialog, tableMessage);
+                lock (_state)
+                    candidate = checkChips && SameTitle(Normalize(text), InsufficientChipsText) ? InsufficientChips :
+                        checkStackUpdate && SameTitle(Normalize(text), StackUpdateText) ? StackUpdate :
+                        childClass == "Static" ? MatchBody(text, isDialog) : null;
                 if (candidate == null) return true;
                 if (match != null && match.Action != candidate)
                 {
-                    match = null;
+                    ambiguous = true;
                     return false;
                 }
                 match ??= new PendingClose(window, owner, title, windowClass, isDialog, candidate, tickCount + candidate.DelayMs)
                     { Body = text };
                 return true;
             }, IntPtr.Zero);
-            return match;
+            if (ambiguous) return null;
+            if (!checkSisalNotice || match?.Action == TableClosed) return match;
+
+            var ok = FindDialogButton(window, owner, "OK");
+            if (ok == IntPtr.Zero) return null;
+            if (match != null) return match with { Button = ok };
+            var notice = _readRenderedNotice?.Invoke(window) switch
+            {
+                SharedMemory.RenderedNotice.InsufficientChips when checkChips => InsufficientChips,
+                SharedMemory.RenderedNotice.StackUpdate when checkStackUpdate => StackUpdate,
+                _ => null,
+            };
+            return notice == null ? null :
+                new PendingClose(window, owner, title, windowClass, isDialog, notice, tickCount) { Button = ok };
         }
 
         private static IntPtr FindDialogButton(IntPtr window, uint owner, string text)
@@ -347,11 +368,7 @@ namespace PokerCaption.Engine
                 {
                     if (run != _runRevision || config != _configRevision) return;
                     if (!_pending.Remove(entry) || !matches) continue;
-                    if (entry.Action.TableReason != TableCloseReason.None)
-                    {
-                        RememberTableClosure(entry);
-                        continue;
-                    }
+                    if (entry.Action.ClosesTable) ObserveTableEnd(GetWindow(entry.Window, OwnerWindow), entry.Owner);
                     sent = entry.Button != IntPtr.Zero ? ClickDialogButton(entry) :
                         NativeMethods.PostMessageW(entry.Window, NativeMethods.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
                 }
@@ -361,28 +378,21 @@ namespace PokerCaption.Engine
             FlushTableClosures(tickCount, run, config);
         }
 
-        private static bool ClickDialogButton(PendingClose entry)
-        {
-            if (entry.Title == "Inactivity Timeout")
-                return NativeMethods.PostMessageW(entry.Button, WmMouseMove, IntPtr.Zero, ClickPoint) &&
-                    NativeMethods.PostMessageW(entry.Button, WmLeftButtonDown, (IntPtr)1, ClickPoint) &&
-                    NativeMethods.PostMessageW(entry.Button, WmLeftButtonUp, IntPtr.Zero, ClickPoint);
+        private static bool ClickDialogButton(PendingClose entry) =>
+            NativeMethods.PostMessageW(entry.Button, WmMouseMove, IntPtr.Zero, ClickPoint) &&
+            NativeMethods.PostMessageW(entry.Button, WmLeftButtonDown, (IntPtr)1, ClickPoint) &&
+            NativeMethods.PostMessageW(entry.Button, WmLeftButtonUp, IntPtr.Zero, ClickPoint);
 
-            bool down = SendMessageTimeoutW(entry.Button, WmLeftButtonDown, (IntPtr)1, ClickPoint,
-                BlockIncomingSends | AbortIfHung | ErrorOnExit, TextTimeoutMs, out _) != IntPtr.Zero;
-            bool up = SendMessageTimeoutW(entry.Button, WmLeftButtonUp, IntPtr.Zero, ClickPoint,
-                BlockIncomingSends | AbortIfHung | ErrorOnExit, TextTimeoutMs, out _) != IntPtr.Zero;
-            return down && up;
+        internal void ObserveTableEnd(IntPtr table)
+        {
+            if (NativeMethods.GetWindowThreadProcessId(table, out var processId) != 0)
+                lock (_state) ObserveTableEnd(table, processId);
         }
 
-        private void RememberTableClosure(PendingClose entry)
+        private void ObserveTableEnd(IntPtr table, uint processId)
         {
-            var table = GetWindow(entry.Window, OwnerWindow);
-            if (!_closureTables.Contains(table) || !HasProcess(table, entry.Owner)) return;
-            if (_tableClosures.TryGetValue(table, out var previous) && previous.ProcessId == entry.Owner)
-                _tableClosures[table] = previous with { Reasons = previous.Reasons | entry.Action.TableReason };
-            else
-                _tableClosures[table] = new TableCloseRequest(entry.Owner, entry.Action.TableReason, null);
+            if (CloseTableHasBeenClosed && _closureTables.Contains(table) && HasProcess(table, processId))
+                _tableClosures.TryAdd(table, new TableCloseRequest(processId, null));
         }
 
         private void FlushTableClosures(long tickCount, int run, int config)
@@ -390,7 +400,7 @@ namespace PokerCaption.Engine
             lock (_state)
             {
                 if (run != _runRevision || config != _configRevision) return;
-                var enabled = CloseTableHasBeenClosed ? TableCloseReason.Closed : TableCloseReason.None;
+                if (!CloseTableHasBeenClosed) return;
                 foreach (var (table, request) in _tableClosures.ToArray())
                 {
                     if (!HasProcess(table, request.ProcessId))
@@ -398,12 +408,14 @@ namespace PokerCaption.Engine
                         _tableClosures.Remove(table);
                         continue;
                     }
-                    if ((request.Reasons & enabled) == 0 ||
-                        (request.LastPostTick is long last && tickCount - last < TableCloseRetryMs)) continue;
+                    if (request.LastPostTick is long last && tickCount - last < TableCloseRetryMs) continue;
                     var popup = _lastActivePopup(table);
-                    if (popup != table && HasProcess(popup, request.ProcessId)) continue;
+                    if (popup != table && NativeMethods.IsWindowVisible(popup) && HasProcess(popup, request.ProcessId)) continue;
                     if (NativeMethods.PostMessageW(table, NativeMethods.WM_CLOSE, IntPtr.Zero, IntPtr.Zero))
+                    {
                         _tableClosures[table] = request with { LastPostTick = tickCount };
+                        _log("auto-dialog: richiesta chiusura del tavolo concluso");
+                    }
                 }
             }
         }
@@ -435,10 +447,6 @@ namespace PokerCaption.Engine
         [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
         private static extern IntPtr SendMessageTimeoutW(IntPtr window, uint message, IntPtr wParam,
             StringBuilder text, uint flags, uint timeout, out UIntPtr result);
-
-        [DllImport("user32.dll", ExactSpelling = true)]
-        private static extern IntPtr SendMessageTimeoutW(IntPtr window, uint message, IntPtr wParam,
-            IntPtr lParam, uint flags, uint timeout, out UIntPtr result);
 
         private static string WindowTitle(IntPtr window)
         {

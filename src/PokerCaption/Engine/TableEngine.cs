@@ -112,7 +112,10 @@ namespace PokerCaption.Engine
             if (m.Success) { t.Sb = 0; t.Bb = ParseMoney(m.Groups[1].Value); t.Currency = "€"; }
             m = System.Text.RegularExpressions.Regex.Match(s, @"ante\s*[$€£]?([\d.,]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
             if (m.Success) t.Ante = ParseMoney(m.Groups[1].Value);
-            m = System.Text.RegularExpressions.Regex.Match(s, @"^([^–\-]+?)\s*[–\-]+\s*(No Limit|Pot Limit|Fixed Limit)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            m = System.Text.RegularExpressions.Regex.Match(s,
+                @"^([^–\-]+?)\s*[–\-]+\s*(No Limit|Pot Limit|Fixed Limit|Limit)\b",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            bool sisalFixedLimit = m.Success && m.Groups[2].Value.Equals("Limit", StringComparison.OrdinalIgnoreCase);
             if (m.Success) t.TableName = m.Groups[1].Value.Trim();
             // via i codici admin/participation che alcune skin mettono nel titolo
             if (!string.IsNullOrEmpty(t.TableName))
@@ -170,7 +173,7 @@ namespace PokerCaption.Engine
 
             if (s.IndexOf("No Limit", StringComparison.OrdinalIgnoreCase) >= 0) t.GameType = "NL";
             else if (s.IndexOf("Pot Limit", StringComparison.OrdinalIgnoreCase) >= 0) t.GameType = "PL";
-            else if (s.IndexOf("Fixed Limit", StringComparison.OrdinalIgnoreCase) >= 0) t.GameType = "FL";
+            else if (sisalFixedLimit || s.IndexOf("Fixed Limit", StringComparison.OrdinalIgnoreCase) >= 0) t.GameType = "FL";
             if (s.IndexOf("Hold'em", StringComparison.OrdinalIgnoreCase) >= 0) t.GameType += "HE";
             else if (s.IndexOf("Omaha", StringComparison.OrdinalIgnoreCase) >= 0) t.GameType += "O";
         }

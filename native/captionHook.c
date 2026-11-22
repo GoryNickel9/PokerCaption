@@ -27,11 +27,16 @@
 #define OFF_CMD        0x7C
 #define OFF_IDX        0x88
 #define OFF_FLAG       0x8C
+#define OFF_NOTICE_REQUEST 0x90
+#define OFF_NOTICE_RESULT  0x94
+#define OFF_NOTICE_REPLY   0x98
+#define OFF_NOTICE_WINDOW  0x9C
 #define SLOT_BASE      0x80578u
 #define SLOT_PITCH     0x2A00u
 
 #include <tlhelp32.h>
 #include <wchar.h>
+#include <stdlib.h>
 #include <string.h>
 #if defined(__i386__)
 #include <MinHook.h>
@@ -39,6 +44,7 @@
 
 #define MSG_CUSTOM_DISPATCH 0x6742     /* trigger dispatcher: PostMessage + WH_GETMESSAGE */
 #define MSG_TABLE_SCAN      0x6743
+#define MSG_READ_NOTICE     0x6744
 #define MSG_NOTIFY          WM_APP     /* 0x401: notifica tavolo */
 
 /* Risolve gli export Cocos2d e pubblica testi e coordinate dei nodi
@@ -178,6 +184,9 @@ static int cc_str_read(const void *s, wchar_t *out, int max)
 #define BACK_POSITION        0x2664u
 #define BACK_DETECTION       0x19D5u
 #define SITOUT_INTENT        0x19D6u
+#define TABLE_END_ENABLED    0x19D7u
+#define TABLE_END_VISIBLE    0x19FCu
+#define TABLE_END_TEXT_CAPACITY 96
 enum ActionHookMode {
     ACTION_HOOKS_DEFAULT, ACTION_SKIP_VISIBLE, ACTION_SKIP_ALL,
     ACTION_PROXY_ONLY = 4, ACTION_WIDGET_ONLY
@@ -203,6 +212,7 @@ struct TextCtx {
     void *board, *seats[11];
     unsigned optionTrace, backPosition;
     int detectBack, backVisible;
+    int detectTableEnd, tableEndVisible;
     BYTE preplayLabel[5], preplayMarks[5];
     const wchar_t *heroNick;
     int heroSeat, canSetAmount;
@@ -341,17 +351,32 @@ static int read_board_cards(void *board)
     return holders == BOARD_CARD_SLOTS && (visible == 0 || visible >= 3) ? visible : -1;
 }
 
-static int read_label(void *node, wchar_t *text, int *isWidget)
+static int read_label(void *node, wchar_t *text, int *isWidget, int capacity)
 {
     if (p_getStringLabel && cocos_has_primary_base(node, ".?AVLabel@cocos2d@@"))
-        return cc_str_read(p_getStringLabel(node), text, TEXT_MAXCHARS);
+        return cc_str_read(p_getStringLabel(node), text, capacity);
     if (p_getStringProxy && cocos_has_primary_base(node, ".?AVLabelProxy@cocos2d@@"))
-        return cc_str_read(p_getStringProxy(node), text, TEXT_MAXCHARS);
+        return cc_str_read(p_getStringProxy(node), text, capacity);
     if (p_getStringText && cocos_has_primary_base(node, ".?AVText@ui@cocos2d@@")) {
         *isWidget = 1;
-        return cc_str_read(p_getStringText(node), text, TEXT_MAXCHARS);
+        return cc_str_read(p_getStringText(node), text, capacity);
     }
     return 0;
+}
+
+static int is_table_end_label(const wchar_t *text)
+{
+    static const wchar_t countdown[] = L"Play at this table has concluded and the table will close in ";
+    const size_t length = ARRAYSIZE(countdown) - 1;
+    if (wcscmp(text, L"This table has been closed") == 0 ||
+        wcscmp(text, L"Play at this table has concluded") == 0) return 1;
+    if (wcsncmp(text, countdown, length) != 0) return 0;
+    const wchar_t *number = text + length;
+    if (*number < L'0' || *number > L'9') return 0;
+    wchar_t *unit;
+    long seconds = wcstol(number, &unit, 10);
+    return seconds >= 0 && seconds < 15 &&
+        (wcscmp(unit, L" sec") == 0 || wcscmp(unit, L" sec.") == 0);
 }
 
 static unsigned read_back_position(struct TextCtx *ctx, void *label)
@@ -419,7 +444,7 @@ static void walk_node(void *node, int depth, struct TextCtx *ctx, int seat, enum
             if (wcscmp(nameW, L"label") == 0) {
                 wchar_t choice[TEXT_MAXCHARS + 1] = {0};
                 int widget = 0;
-                if (read_label(node, choice, &widget)) {
+                if (read_label(node, choice, &widget, TEXT_MAXCHARS)) {
                     if (_wcsicmp(choice, L"Sit out next hand") == 0) ctx->preplayLabel[preplay] = 1;
                     if (_wcsicmp(choice, L"Sit out next big blind") == 0) ctx->preplayLabel[preplay] = 2;
                 }
@@ -442,7 +467,7 @@ static void walk_node(void *node, int depth, struct TextCtx *ctx, int seat, enum
 
         wchar_t text[TEXT_MAXCHARS + 1] = {0};
         int isWidget = 0;
-        if (optionNode && read_label(node, text, &isWidget)) {
+        if (optionNode && read_label(node, text, &isWidget, TEXT_MAXCHARS)) {
             if (optionNode == OPTION_BACK_NODE && _wcsicmp(text, L"I'm Back") == 0) {
                 ctx->optionTrace |= OPTION_BACK_LABEL;
                 ctx->backPosition = read_back_position(ctx, node);
@@ -472,12 +497,14 @@ static void walk_node(void *node, int depth, struct TextCtx *ctx, int seat, enum
         role = TABLE_ACTION;
 
     /* Call class-specific getters only for their matching concrete types. */
-    wchar_t textW[TEXT_MAXCHARS + 1]; textW[0] = 0;
+    wchar_t textW[TABLE_END_TEXT_CAPACITY]; textW[0] = 0;
     int hasText = 0;
     int isWidget = 0;
     int findHero = seat && ctx->heroNick && !ctx->heroSeat;
-    if (role != TABLE_OTHER || findHero || optionNode == OPTION_BACK_NODE)
-        hasText = read_label(node, textW, &isWidget);
+    int findTableEnd = ctx->detectTableEnd && !ctx->tableEndVisible && !seat && role == TABLE_OTHER;
+    if (role != TABLE_OTHER || findHero || optionNode == OPTION_BACK_NODE || findTableEnd)
+        hasText = read_label(node, textW, &isWidget, findTableEnd ? ARRAYSIZE(textW) : TEXT_MAXCHARS);
+    if (hasText && findTableEnd && is_table_end_label(textW)) ctx->tableEndVisible = 1;
     if (hasText && optionNode == OPTION_BACK_NODE && _wcsicmp(textW, L"I'm Back") == 0) {
         ctx->backVisible = 1;
         ctx->backPosition = read_back_position(ctx, node);
@@ -681,7 +708,7 @@ static int visible_action(void *node, int depth)
     if (!p_isVisible(node) || depth > 4) return 0;
     wchar_t text[TEXT_MAXCHARS + 1];
     int isWidget = 0;
-    if (read_label(node, text, &isWidget)) {
+    if (read_label(node, text, &isWidget, TEXT_MAXCHARS)) {
         int code = action_code(text);
         if (code) return code;
     }
@@ -847,7 +874,7 @@ static void scan_table(BYTE *sh, int idx, LONG request)
     int cw = 0, chh = 0;
     if (GetClientRect(table, &rc)) { cw = rc.right - rc.left; chh = rc.bottom - rc.top; }
     struct TextCtx tctx = { .slot = slot, .table = table, .clientW = cw, .clientH = chh, .boardCards = -1,
-        .detectBack = slot[BACK_DETECTION] };
+        .detectBack = slot[BACK_DETECTION], .detectTableEnd = slot[TABLE_END_ENABLED] };
     wchar_t title[512] = {0};
     GetWindowTextW(table, title, ARRAYSIZE(title));
     const wchar_t *login = wcsstr(title, L"Logged In as ");
@@ -914,6 +941,7 @@ static void scan_table(BYTE *sh, int idx, LONG request)
     *(DWORD *)(slot + 0x19F0) = (DWORD)tctx.nodes;   /* diag: nodi visitati */
     *(DWORD *)(slot + 0x19F4) = (DWORD)tctx.count;   /* diag: label raccolte */
     slot[SITOUT_INTENT] = sitout_intent(&tctx);
+    slot[TABLE_END_VISIBLE] = (BYTE)tctx.tableEndVisible;
     *(DWORD *)(slot + OPTION_TRACE_RESULT) = tctx.backVisible ? OPTION_BACK_LABEL : 0;
 
     /* Segnala la scansione completata. */
@@ -923,6 +951,43 @@ static void scan_table(BYTE *sh, int idx, LONG request)
 }
 
 /* Esegue il comando registrato nell'header condiviso. */
+// The x86 message dialog keeps its displayed body outside the Win32 child controls.
+static LONG read_sisal_notice(HWND window)
+{
+#if defined(__i386__)
+    HMODULE module = GetModuleHandleW(L"Sisal.exe");
+    if (!module || GetWindowThreadProcessId(window, NULL) != GetCurrentThreadId() ||
+        !IsWindowVisible(window)) return 0;
+    wchar_t title[16] = {0}, cls[16] = {0};
+    GetWindowTextW(window, title, ARRAYSIZE(title));
+    GetClassNameW(window, cls, ARRAYSIZE(cls));
+    if (wcscmp(title, L"Sisal") != 0 || wcscmp(cls, L"#32770") != 0) return 0;
+
+    // Limit the private layout to the dialog procedure observed in this client build.
+    const uintptr_t known_dialog_proc = 0xE130F0u;
+    const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)module;
+    const IMAGE_NT_HEADERS32 *image = (const IMAGE_NT_HEADERS32 *)((const BYTE *)module + dos->e_lfanew);
+    if (image->FileHeader.TimeDateStamp != 0x6AF1DAFAu || image->OptionalHeader.SizeOfImage != 0x2D39000u)
+        return 0;
+    if ((uintptr_t)GetWindowLongPtrW(window, DWLP_DLGPROC) != (uintptr_t)module + known_dialog_proc)
+        return 0;
+    const void *const *state = (const void *const *)GetWindowLongPtrW(window, DWLP_USER);
+    if (!state || IsBadReadPtr(state, 2 * sizeof(void *))) return 0;
+    const BYTE *dialog = state[1];
+    const char *type = cocos_type_name((void *)dialog);
+    const size_t body_offset = 0xB0u;
+    if (!type || strcmp(type, ".?AVMessageDialog@PokerGame@@") != 0 ||
+        IsBadReadPtr(dialog + body_offset, sizeof(void *))) return 0;
+
+    const wchar_t *body = *(const wchar_t *const *)(dialog + body_offset);
+    static const wchar_t chips[] = L"You requested more chips than you have available";
+    static const wchar_t stack[] = L"Your stack will be updated when the current hand is finished";
+    if (body && !IsBadReadPtr(body, sizeof(chips)) && memcmp(body, chips, sizeof(chips)) == 0) return 1;
+    if (body && !IsBadReadPtr(body, sizeof(stack)) && memcmp(body, stack, sizeof(stack)) == 0) return 2;
+#endif
+    return 0;
+}
+
 static void dispatch(BYTE *sh)
 {
     int cmd = *(int *)(sh + OFF_CMD);
@@ -968,6 +1033,18 @@ LRESULT CALLBACK hookProc(int nCode, WPARAM wParam, LPARAM lParam)
             if (InterlockedCompareExchange(&g_busy, 1, 0) == 0) {
                 dispatch(sh);
                 InterlockedExchange(&g_busy, 0);
+            }
+        }
+        else if (cwp->message == MSG_READ_NOTICE) {
+            LONG request = (LONG)cwp->wParam;
+            volatile LONG *pending = (volatile LONG *)(sh + OFF_NOTICE_REQUEST);
+            if (request && *pending == request &&
+                (DWORD)(uintptr_t)cwp->hwnd == *(const DWORD *)(sh + OFF_NOTICE_WINDOW)) {
+                LONG result = read_sisal_notice(cwp->hwnd);
+                if (*pending == request) {
+                    InterlockedExchange((volatile LONG *)(sh + OFF_NOTICE_RESULT), result);
+                    InterlockedExchange((volatile LONG *)(sh + OFF_NOTICE_REPLY), request);
+                }
             }
         }
         else if (cwp->message == 0x47) {
