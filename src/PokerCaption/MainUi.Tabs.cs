@@ -34,7 +34,7 @@ namespace PokerCaption
             "CheckBox90", "CheckBox94", "CheckBox279", "Edit236", "UpDown165",
         };
 
-        private sealed record DialogRule(CheckBox Box, string Caption, string LegacyKey);
+        private sealed record DialogRule(CheckBox Box, string Caption);
         private readonly List<DialogRule> _dialogRules = new List<DialogRule>();
 
         private static readonly (string Control, string Key, bool Default)[] OptionsFlags =
@@ -205,8 +205,7 @@ namespace PokerCaption
                 var match = captionPattern.Match(box.Text.Trim());
                 if (!match.Success) continue;
 
-                string legacy = box.Name == "cbCloseLogoutInfo" ? "CloseLogoutInfo" : null;
-                var rule = new DialogRule(box, match.Groups[1].Value.Trim(), legacy);
+                var rule = new DialogRule(box, match.Groups[1].Value.Trim());
                 _dialogRules.Add(rule);
                 box.CheckedChanged += (_, _) =>
                 {
@@ -240,6 +239,7 @@ namespace PokerCaption
                 entry.Key.Equals("CloseSeatIsReserved", StringComparison.OrdinalIgnoreCase) ||
                 entry.Key.Equals("CloseSeatIsOccupied", StringComparison.OrdinalIgnoreCase) ||
                 entry.Key.Equals("CloseMyNews", StringComparison.OrdinalIgnoreCase) ||
+                entry.Key.Equals("CloseLogoutInfo", StringComparison.OrdinalIgnoreCase) ||
                 entry.Key.Equals("StarsAccountInfo", StringComparison.OrdinalIgnoreCase) ||
                 entry.Key.Equals("TrnyRegShowLobbyClose", StringComparison.OrdinalIgnoreCase) ||
                 entry.Key.Equals("WaitingListOk", StringComparison.OrdinalIgnoreCase));
@@ -250,13 +250,6 @@ namespace PokerCaption
                 foreach (var rule in _dialogRules)
                 {
                     var entry = saved.FirstOrDefault(x => string.Equals(x.Caption, rule.Caption, StringComparison.OrdinalIgnoreCase));
-                    if (entry.Caption == null && rule.LegacyKey != null &&
-                        Program.Ini.GetBool("PokerCaption", rule.LegacyKey, false))
-                    {
-                        entry = (rule.Caption, 0);
-                        saved.Add(entry);
-                        migrated = true;
-                    }
                     rule.Box.Checked = entry.Caption != null;
                 }
             }
@@ -277,8 +270,6 @@ namespace PokerCaption
                 rules.RemoveAll(x => string.Equals(x.Caption, rule.Caption, StringComparison.OrdinalIgnoreCase));
             }
 
-            if (rule.LegacyKey != null)
-                Program.Ini.Set("PokerCaption", rule.LegacyKey, rule.Box.Checked ? "1" : "0");
             WriteDialogRules(rules);
         }
 

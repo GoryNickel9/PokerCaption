@@ -332,7 +332,7 @@ namespace PokerCaption
 
             // --- binding map (Fase B) ---
             var map = UiBinding.Settings;
-            Check("desktop settings bind to unique controls", map.Count == 5 && map.Select(item => item.Control).Distinct().Count() == map.Count);
+            Check("desktop settings bind to unique controls", map.Count == 4 && map.Select(item => item.Control).Distinct().Count() == map.Count);
 
             // --- tag HUD (Fase 7) ---
             var tc = new TagContext
@@ -615,7 +615,7 @@ namespace PokerCaption
             Check("Player HUD drag offsets scale and affect only the dragged seat",
                 HudEngine.PlayerPanelPosition(playerPanel, 3, anchor, 1) == new Point(320, 190) &&
                 HudEngine.PlayerPanelPosition(playerPanel, 4, anchor, 2) == anchor);
-            using (var tableWindow = new Form { ClientSize = new Size(400, 240), TopMost = true })
+            using (var tableWindow = new Form { ClientSize = new Size(400, 240) })
             using (var dragHud = new HudEngine(null))
             {
                 pin.Set("HUD", "plFormatStr0", "Player drag test");
@@ -626,10 +626,24 @@ namespace PokerCaption
                 var testTable = new TableInfo { Hwnd = tableWindow.Handle };
                 NativeMethods.GetWindowRect(testTable.Hwnd, out testTable.Rect);
                 testTable.SeatBounds[2] = new Rectangle(60, 75, 100, 16);
-                void RefreshPlayerPanels() => dragHud.UpdatePlayerPanels(testTable, new TagContext { Table = testTable }, onTop: true);
+                void RefreshPlayerPanels() => dragHud.UpdatePlayerPanels(testTable, new TagContext { Table = testTable }, tableVisible: true);
                 RefreshPlayerPanels();
                 var overlay = Application.OpenForms.OfType<HudTextPanel>().SingleOrDefault(p => p.Visible);
                 Check("Player HUD creates an interactive overlay when unlocked", overlay is { Draggable: true });
+                using (var coveringWindow = new Form
+                {
+                    StartPosition = FormStartPosition.Manual,
+                    Bounds = new Rectangle(tableWindow.Left + 120, tableWindow.Top + 45, 320, 190)
+                })
+                {
+                    coveringWindow.Show();
+                    Application.DoEvents();
+                    dragHud.OnTick([testTable]);
+                    Check("Player HUD stays visible and owned by its table when the table centre is covered",
+                        overlay is { Visible: true, TopMost: false } &&
+                        NativeMethods.GetWindowLongW(overlay.Handle, NativeMethods.GWL_HWNDPARENT) == tableWindow.Handle.ToInt32(),
+                        $"visible={overlay?.Visible}, topmost={overlay?.TopMost}, owner={NativeMethods.GetWindowLongW(overlay.Handle, NativeMethods.GWL_HWNDPARENT):x}, table={tableWindow.Handle:x}");
+                }
                 if (overlay != null)
                 {
                     var start = overlay.Location;

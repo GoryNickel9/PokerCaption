@@ -198,9 +198,72 @@ namespace PokerCaption
             check("BetScript converts 1600 chips into 8 BB for the rendered bet box only", playMoneyBet.Amount == 1600 &&
                 BetScriptEngine.FormatForBetBox(playMoneyBet, playMoney, coords: true) == "8" &&
                 BetScriptEngine.FormatForBetBox(playMoneyBet, playMoney, coords: false) == "1600", "");
+            playMoney.Pot = 850;
+            playMoney.AmountToCall = 284;
+            playMoney.DisplayedRaiseTo = 566;
+            engine.Rules[0].Formula = "pot * 0.33";
+            var facingBet = engine.EvaluateScenario(BetScriptEngine.ScenarioForTable(playMoney, null));
+            check("BetScript sends the displayed legal raise when 33% of the pot is below the call",
+                facingBet.Amount is double amount && Math.Abs(amount - 280.5) < 0.001 &&
+                BetScriptEngine.FormatForBetBox(facingBet, playMoney, coords: true) == "2.83" &&
+                BetScriptEngine.AmountForBetBox(600, playMoney) == 600, "");
+
+            CheckTargetedInput(check);
+
             check("BetScript corrects the stock field location and preserves custom calibration",
                 BetScriptEngine.BetBoxPoint((0.730f, 0.865f)) == (0.697f, 0.872f) &&
                 BetScriptEngine.BetBoxPoint((0.68f, 0.87f)) == (0.68f, 0.87f), "");
+        }
+
+        private static void CheckTargetedInput(Action<string, bool, string> check)
+        {
+            using var first = new AmountInputFixture();
+            using var second = new AmountInputFixture();
+            first.ClientSize = second.ClientSize = new System.Drawing.Size(650, 460);
+            first.Opacity = second.Opacity = 0;
+            first.Show();
+            second.Show();
+            // The test runner can start with SW_HIDE, consumed by the first ShowWindow call.
+            first.Hide();
+            first.Show();
+            Application.DoEvents();
+            Native.NativeMethods.GetCursorPos(out var before);
+            var foreground = Native.NativeMethods.GetForegroundWindow();
+            bool posted = CoordsEngine.PostAmount(first.Handle, 0.69, 0.85, "2.83") &&
+                CoordsEngine.PostAmount(second.Handle, 0.69, 0.85, "5");
+            Application.DoEvents();
+            Native.NativeMethods.GetCursorPos(out var after);
+            check("BetScript sends amounts to two explicit windows without activating them or moving the cursor",
+                posted && first.Amount == "2.83" && second.Amount == "5" &&
+                first.Presses == 1 && second.Presses == 1 && !first.Confirmed && !second.Confirmed &&
+                before.X == after.X && before.Y == after.Y &&
+                foreground == Native.NativeMethods.GetForegroundWindow(), $"posted={posted}, first={first.Amount}/{first.Presses}, second={second.Amount}/{second.Presses}");
+        }
+
+        private sealed class AmountInputFixture : Form
+        {
+            internal string Amount { get; private set; } = "100";
+            internal int Presses { get; private set; }
+            internal bool Confirmed { get; private set; }
+
+            protected override void WndProc(ref Message message)
+            {
+                if (message.Msg == Input.WM_LBUTTONDOWN) { Presses++; return; }
+                if (message.Msg == Input.WM_LBUTTONUP) return;
+                if (message.Msg == Input.WM_KEYDOWN)
+                {
+                    if (message.WParam == (IntPtr)0x08 && Amount.Length > 0) Amount = Amount[..^1];
+                    if (message.WParam == (IntPtr)0x0D) Confirmed = true;
+                    return;
+                }
+                if (message.Msg == Input.WM_CHAR)
+                {
+                    char value = (char)message.WParam.ToInt32();
+                    if (char.IsAsciiDigit(value) || value == '.') Amount += value;
+                    return;
+                }
+                base.WndProc(ref message);
+            }
         }
 
         private static string TestPath() => Path.Combine(Path.GetTempPath(), "poker-caption-bets-" + Guid.NewGuid() + ".ini");

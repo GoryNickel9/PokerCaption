@@ -269,15 +269,7 @@ internal static class DesktopWindow
 
     private static readonly (string name, string caption)[] DialogRules =
     [
-        ("cbCloseLogoutInfo", "PokerStars Logout Information"),
-        ("CheckBox421", "Reminder: Your current sesson has been active for X hours"),
-        ("CheckBox506", "You have been successfully removed from all the waiting lists"),
-        ("CheckBox500", "You reached the cap of cash game tables"),
-        ("CheckBox313", "You are playing at too many tables"),
-        ("CheckBox312", "You are currently playing the maximum allowed Zoom tables at once"),
         ("CheckBox327", "table is closed"),
-        ("CheckBox372", "You have been unregistered from"),
-        ("CheckBox170", "Would you like to register into another Satellite?")
     ];
 
     internal static Form CreateTagPicker()

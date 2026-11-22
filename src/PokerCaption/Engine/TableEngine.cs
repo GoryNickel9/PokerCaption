@@ -24,6 +24,7 @@ namespace PokerCaption.Engine
         public double Pot, Bet, Stack;
         internal bool BetBoxInBb;
         public double? AmountToCall;
+        internal double? DisplayedRaiseTo;
         public readonly Dictionary<int, double> SeatStacks = new();
         public readonly Dictionary<int, System.Drawing.Rectangle> SeatBounds = new();
         public readonly Dictionary<int, string> SeatActions = new();

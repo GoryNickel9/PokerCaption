@@ -136,17 +136,6 @@ namespace PokerCaption.Engine
                 foreach (var hwnd in _perTable.Keys.ToList()) DestroyTablePanels(hwnd);
         }
 
-        /// <summary>True se il tavolo è la finestra visibile al proprio centro (coperta → HUD nascosto).</summary>
-        private bool TableOnTop(TableInfo t)
-        {
-            int cx = (t.Rect.Left + t.Rect.Right) / 2;
-            int cy = (t.Rect.Top + t.Rect.Bottom) / 2;
-            var h = NativeMethods.WindowFromPoint(new NativeMethods.POINT { X = cx, Y = cy });
-            return h == t.Hwnd || NativeMethods.IsChild(t.Hwnd, h) ||
-                (_perTable.TryGetValue(t.Hwnd, out var panels) && panels.Any(p => p.IsHandleCreated && p.Handle == h)) ||
-                (_perPlayer.TryGetValue(t.Hwnd, out var players) && players.Values.Any(p => p.IsHandleCreated && p.Handle == h));
-        }
-
         internal void FollowTables(IReadOnlyList<TableInfo> tables)
         {
             if (!Active) return;
@@ -183,16 +172,14 @@ namespace PokerCaption.Engine
             foreach (var t in tables)
             {
                 if (!NativeMethods.IsWindow(t.Hwnd)) continue;
-                bool onTop = TableOnTop(t);
+                bool tableVisible = NativeMethods.IsWindowVisible(t.Hwnd) && !NativeMethods.IsIconic(t.Hwnd);
                 if (!_perTable.TryGetValue(t.Hwnd, out var panels))
                 {
                     panels = new List<HudTextPanel>();
                     foreach (var def in Panels)
                     {
                         if (def.PlayerPanel) continue;
-                        var p = new HudTextPanel(clickThrough: true);
-                        p.Show();
-                        OverlayUtil.ShowNoActivate(p);
+                        var p = new HudTextPanel(clickThrough: true, tableOwner: t.Hwnd);
                         panels.Add(p);
                     }
                     _perTable[t.Hwnd] = panels;
@@ -208,18 +195,18 @@ namespace PokerCaption.Engine
                 foreach (var def in Panels.Where(def => !def.PlayerPanel))
                 {
                     var panel = panels[idx++];
-                    string text = def.Visible && onTop && HudTags.Visible(def.Format, ctx) ? HudTags.Resolve(def.Format, ctx) : "";
+                    string text = def.Visible && tableVisible && HudTags.Visible(def.Format, ctx) ? HudTags.Resolve(def.Format, ctx) : "";
                     if (string.IsNullOrWhiteSpace(text)) { panel.Visible = false; continue; }
                     panel.SetRuns([(text, def.FontColor, Color.Empty, def.FontSize, true)], Padding.Empty);
                     panel.MoveTo(new Rectangle(center - panel.Width / 2, y, panel.Width, panel.Height));
-                    OverlayUtil.ShowNoActivate(panel);
+                    panel.ShowOwned();
                     y += panel.Height + 2;
                 }
 
-                UpdatePlayerPanels(t, ctx, onTop);
+                UpdatePlayerPanels(t, ctx, tableVisible);
 
-                // bet box in bb (CustomBetBox) — visibile solo a tavolo scoperto
-                if (onTop) UpdateBbBox(t, tables);
+                // L’ordine delle finestre nasconde automaticamente le aree coperte.
+                if (tableVisible && CustomBetBox) UpdateBbBox(t, tables);
                 else if (_bbBoxes.TryGetValue(t.Hwnd, out var hiddenBox)) hiddenBox.Visible = false;
             }
 
@@ -230,13 +217,13 @@ namespace PokerCaption.Engine
             }
         }
 
-        internal void UpdatePlayerPanels(TableInfo t, TagContext ctx, bool onTop)
+        internal void UpdatePlayerPanels(TableInfo t, TagContext ctx, bool tableVisible)
         {
             if (!_perPlayer.TryGetValue(t.Hwnd, out var windows))
                 _perPlayer[t.Hwnd] = windows = new();
             var used = new HashSet<(int seat, int panel)>();
             var origin = new NativeMethods.POINT();
-            if (onTop && NativeMethods.ClientToScreen(t.Hwnd, ref origin) && NativeMethods.GetClientRect(t.Hwnd, out var client))
+            if (tableVisible && NativeMethods.ClientToScreen(t.Hwnd, ref origin) && NativeMethods.GetClientRect(t.Hwnd, out var client))
             {
                 foreach (var (seat, anchor) in t.SeatBounds.Concat(t.ActionHistory.MissingAnchors(t.SeatBounds)))
                 {
@@ -252,7 +239,7 @@ namespace PokerCaption.Engine
                         used.Add(key);
                         if (!windows.TryGetValue(key, out var panel))
                         {
-                            windows[key] = panel = new HudTextPanel(clickThrough: LockPanels);
+                            windows[key] = panel = new HudTextPanel(clickThrough: LockPanels, tableOwner: t.Hwnd);
                             int panelIndex = def.Index;
                             panel.DraggedTo += (x, y) =>
                             {
@@ -274,7 +261,7 @@ namespace PokerCaption.Engine
                             var position = PlayerPanelPosition(def, seat, defaultPosition, TableScale(t));
                             panel.MoveTo(new Rectangle(position, panel.Size));
                         }
-                        OverlayUtil.ShowNoActivate(panel);
+                        panel.ShowOwned();
                         y += panel.Height + 1;
                     }
                 }
@@ -314,12 +301,9 @@ namespace PokerCaption.Engine
 
         private void UpdateBbBox(TableInfo t, IReadOnlyList<TableInfo> tables)
         {
-            if (!CustomBetBox) return;
             if (!_bbBoxes.TryGetValue(t.Hwnd, out var box))
             {
-                box = new HudTextPanel(clickThrough: false) { BackColorOverride = Color.FromArgb(200, 20, 20, 20) };
-                box.Show();
-                OverlayUtil.ShowNoActivate(box);
+                box = new HudTextPanel(clickThrough: false, tableOwner: t.Hwnd) { BackColorOverride = Color.FromArgb(200, 20, 20, 20) };
                 _bbBoxes[t.Hwnd] = box;
             }
 
@@ -340,6 +324,7 @@ namespace PokerCaption.Engine
                 t.Rect.Left + (int)(BbBetboxX * scale),
                 t.Rect.Top + (int)(BbBetboxY * scale),
                 (int)(box.ClientSize.Width * BetBoxWidthFactor), box.ClientSize.Height));
+            box.ShowOwned();
         }
 
         private static double TableScale(TableInfo t)

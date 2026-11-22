@@ -47,7 +47,7 @@ namespace PokerCaption
                         Program.Ini.GetBool(section, key, !initial) == initial, "");
                 }
 
-                check("Options dialog rule count", controller._dialogRules.Count == 9,
+                check("Options dialog rule count", controller._dialogRules.Count == 1,
                     controller._dialogRules.Count.ToString());
                 foreach (var rule in controller._dialogRules)
                 {
@@ -79,27 +79,30 @@ namespace PokerCaption
                 Program.Ini.Set("AutoDialog", "Caption5", "Seat Me / All seats have been taken");
                 Program.Ini.Set("AutoDialog", "Caption6", "My News");
                 Program.Ini.Set("AutoDialog", "Caption7", "PokerStars Logout Information");
-                Program.Ini.Set("AutoDialog", "Delay7", 17);
+                Program.Ini.Set("AutoDialog", "Caption8", "You have been unregistered from");
+                Program.Ini.Set("AutoDialog", "Caption9", "table is closed");
+                Program.Ini.Set("AutoDialog", "Delay9", 17);
                 controller.SyncDialogsFromIni();
                 check("Options removed rules are purged and surviving delay is preserved",
                     removed.All(entry => Program.Ini.Get(section, entry.Item2) == null) &&
                     Program.Ini.GetInt("AutoDialog", "Count", -1) == 1 &&
-                    Program.Ini.Get("AutoDialog", "Caption0") == "PokerStars Logout Information" &&
+                    Program.Ini.Get("AutoDialog", "Caption0") == "table is closed" &&
                     Program.Ini.GetInt("AutoDialog", "Delay0", -1) == 17 &&
                     Program.Ini.Get("AutoDialog", "Caption1") == null, "");
-                if (Ctl(page, "cbCloseLogoutInfo") is CheckBox logout) logout.Checked = false;
+                if (Ctl(page, "CheckBox327") is CheckBox closedTable) closedTable.Checked = false;
 
                 var columns = Ctl(page, "dialogColumns") as TableLayoutPanel;
                 check("Options dialog rules span two populated columns", columns is { ColumnCount: 2 } &&
                     columns.Controls.Count == 2 && columns.Controls.Cast<Control>().All(column => column.Controls.Count > 0) &&
-                    columns.Controls.Cast<Control>().Sum(column => column.Controls.OfType<CheckBox>().Count()) == 12, "");
+                    columns.Controls.Cast<Control>().Sum(column => column.Controls.OfType<CheckBox>().Count()) == 4, "");
 
                 check("Options Find a Player removed", Ctl(page, "CheckBox57") == null &&
                     Ctl(page, "Edit23") == null && Ctl(page, "UpDown45") == null, "");
                 string[] retiredControls = ["cbCloseMyNews", "cbStarsAccountInfo", "CheckBox532", "CheckBox472",
                     "CheckBox477", "CheckBox508", "CheckBox390", "CheckBox549", "CheckBox452", "CheckBox89",
-                    "CheckBox41", "CheckBox63"];
-                string[] retiredKeys = ["WaitingListOk", "CloseMyNews", "StarsAccountInfo", "TrnyRegShowLobbyClose"];
+                    "CheckBox41", "CheckBox63", "CheckBox372", "CheckBox170", "cbCloseLogoutInfo", "CheckBox421",
+                    "CheckBox506", "CheckBox500", "CheckBox313", "CheckBox312"];
+                string[] retiredKeys = ["WaitingListOk", "CloseMyNews", "StarsAccountInfo", "TrnyRegShowLobbyClose", "CloseLogoutInfo"];
                 foreach (string key in retiredKeys) Program.Ini.Set(section, key, 1);
                 controller.SyncDialogsFromIni();
                 check("Options retired dialog controls and legacy flags are removed",

@@ -18,7 +18,7 @@ internal static class TableManagerSelfTest
             TableManagerConfig.SeedProfiles(dir);
             var stack = TableManagerConfig.Load(dir, "stack");
             var grid = TableManagerConfig.Load(dir, "3x2");
-            check("TM preset stack and grid", stack.InactiveSlots is [{ Height: 461 }] &&
+            check("TM preset stack and grid", stack.InactiveSlots is [{ Width: 640, EffectiveHeight: 461 }] &&
                 stack.ActiveSlots.Count == 5 && grid.InactiveSlots.Count == 6 &&
                 grid.InactiveSlots[0].EffectiveHeight == 461, "");
 
@@ -29,9 +29,9 @@ internal static class TableManagerSelfTest
             config.Save(dir, "test");
             var reloaded = TableManagerConfig.Load(dir, "test");
             var raw = IniFile.Load(original);
-            check("TM round-trip preserves negative coordinates, height and metadata and drops retired slot settings",
-                reloaded.InactiveSlots is [{ Left: -200, Height: 455 }] &&
-                raw.Get("inact", "extra0") == "yes" && raw.Get("inact", "bind0") == null && raw.Get("inact", "multislot0") == null &&
+            check("TM round-trip preserves negative coordinates and metadata and drops retired slot settings",
+                reloaded.InactiveSlots is [{ Left: -200, EffectiveHeight: 461 }] &&
+                raw.Get("inact", "extra0") == "yes" && raw.Get("inact", "height0") == null && raw.Get("inact", "bind0") == null && raw.Get("inact", "multislot0") == null &&
                 raw.Get("options", "future") == "preserve", "");
 
             ini.Set("PokerCaption", "TableManagerConfig", "test");
@@ -54,7 +54,7 @@ internal static class TableManagerSelfTest
             var third = new TableInfo { Hwnd = (IntPtr)3 };
             TableInfo[] tables = { first, second, third };
             manager.OnTick(tables, 1_000);
-            var home = new Rectangle(-200, 20, 640, 455);
+            var home = new Rectangle(-200, 20, 640, 461);
             check("TM reserves the home of the active table and leaves overflow unplaced",
                 first.InActiveSlot && first.PlacedSlot == 0 && positions[first.Hwnd].X == 900 &&
                 !second.InActiveSlot && second.PlacedSlot < 0 && !positions.ContainsKey(second.Hwnd) &&
@@ -85,14 +85,13 @@ internal static class TableManagerSelfTest
 
             check("TM exposes a single home slot list without the retired options or capture button",
                 slots.Items.Count == 1 && !controls.OfType<ComboBox>().Any(c => c.AccessibleName is "Slot type" or "Active slot binding") &&
-                !controls.Any(c => c.Text is "Layout options" or "Use open table" or "Allow multiple tables in this slot"), "");
+                !controls.Any(c => c.Text is "Layout options" or "Use open table" or "Allow multiple tables in this slot" || c.AccessibleName == "Height"), "");
             GeometryField("Left").Value = 950;
             GeometryField("Top").Value = 30;
             GeometryField("Width").Value = 850;
-            GeometryField("Height").Value = 620;
             manager.OnTick(tables, 1_030);
             check("TM previews existing slot geometry without saving or changing its assignment",
-                positions[first.Hwnd] == new Rectangle(950, 30, 850, 620) && first.PlacedSlot == 0 &&
+                positions[first.Hwnd] == new Rectangle(950, 30, 850, new TableManagerConfig.Slot { Width = 850 }.EffectiveHeight) && first.PlacedSlot == 0 &&
                 positions[second.Hwnd].X == 900 && TableManagerConfig.Load(dir, "test").InactiveSlots[0].Left == -200, "");
             Click("Save and activate");
             check("TM saves edited home geometry and preserves configured active slots",
@@ -122,10 +121,10 @@ internal static class TableManagerSelfTest
                 Bounds = new Rectangle(area.Left + 25, area.Top + 25, 540, 360) };
             testWindow.Show();
             Application.DoEvents();
-            var expected = new Rectangle(area.Left + 40, area.Top + 60, 400, 300);
+            var expected = new Rectangle(area.Left + 40, area.Top + 60, 400, new TableManagerConfig.Slot { Width = 400 }.EffectiveHeight);
             windowConfig.InactiveSlots.Add(new TableManagerConfig.Slot
             {
-                Left = expected.Left, Top = expected.Top, Width = expected.Width, Height = expected.Height
+                Left = expected.Left, Top = expected.Top, Width = expected.Width
             });
             windowConfig.Save(dir, "native");
             ini.Set("PokerCaption", "TableManagerConfig", "native");
@@ -139,58 +138,6 @@ internal static class TableManagerSelfTest
                 Rectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom) == expected,
                 $"actual={testWindow.Bounds}, expected={expected}, state={testWindow.WindowState}");
 
-            var shortSlot = new Rectangle(expected.Location, new Size(400, 200));
-            using (var proportionalWindow = new Form
-            {
-                StartPosition = FormStartPosition.Manual, ShowInTaskbar = false,
-                Bounds = new Rectangle(expected.Location, new Size(480, 360))
-            })
-            {
-                proportionalWindow.Resize += (_, _) =>
-                {
-                    int proportionalHeight = proportionalWindow.Width * 3 / 4;
-                    if (proportionalWindow.Height != proportionalHeight) proportionalWindow.Height = proportionalHeight;
-                };
-                proportionalWindow.Show();
-                Application.DoEvents();
-                var layout = new TableManagerEngine(null) { ConfigDir = dir, RenderedClient = true };
-                layout.Load(ini);
-                layout.PreviewGeometry(0, new TableManagerConfig.Slot
-                {
-                    Left = shortSlot.Left, Top = shortSlot.Top, Width = shortSlot.Width, Height = shortSlot.Height
-                });
-                var proportionalTable = new TableInfo { Hwnd = proportionalWindow.Handle };
-                layout.OnTick([proportionalTable], 1000);
-                Application.DoEvents();
-                int firstHeight = proportionalWindow.Height;
-                layout.OnTick([proportionalTable], 1200);
-                Application.DoEvents();
-                layout.OnTick([proportionalTable], 1400);
-                check("TM fits an aspect-constrained window after reading the actual height",
-                    firstHeight == 300 && proportionalWindow.Width == 266 && proportionalWindow.Height <= shortSlot.Height &&
-                    proportionalTable.PlacedSlot == 0,
-                    $"first height={firstHeight}, final size={proportionalWindow.Size}");
-            }
-            check("TM scales width only when the client enforces a height larger than the explicit slot",
-                TableManagerEngine.FitWithinHeight(shortSlot, expected) ==
-                    new Rectangle(expected.Location, new Size(266, 200)) &&
-                TableManagerEngine.FitWithinHeight(expected, expected) == null &&
-                TableManagerEngine.FitWithinHeight(shortSlot, new Rectangle(0, 0, 401, 300)) == null, "");
-
-            int heightOnly = expected.Height + 30;
-            var direct = new TableInfo { Hwnd = testWindow.Handle };
-            native.Load(ini);
-            native.OnTick([direct], 250);
-            native.PreviewGeometry(0, new TableManagerConfig.Slot
-            {
-                Left = expected.Left, Top = expected.Top, Width = expected.Width, Height = heightOnly
-            });
-            native.OnTick([direct], 400);
-            Application.DoEvents();
-            check("TM applies a Height-only preview without saving or changing width",
-                testWindow.Bounds == new Rectangle(expected.Location, new Size(expected.Width, heightOnly)) &&
-                TableManagerConfig.Load(dir, "native").InactiveSlots[0].Height == expected.Height, "");
-
             windowConfig.InactiveSlots[0].Left += 70;
             windowConfig.InactiveSlots[0].Width += 90;
             windowConfig.ActiveSlots.Add(new TableManagerConfig.Slot { Left = expected.X + 150 });
@@ -202,7 +149,7 @@ internal static class TableManagerSelfTest
             var rendered = new TableInfo { Hwnd = testWindow.Handle, HeroAct = true };
             native.OnTick(new[] { rendered }, 1000);
             Application.DoEvents();
-            var moved = new Rectangle(expected.X + 70, expected.Y, expected.Width + 90, expected.Height);
+            var moved = new Rectangle(expected.X + 70, expected.Y, expected.Width + 90, windowConfig.InactiveSlots[0].EffectiveHeight);
             check("TM rendered-client mode sizes the home window without activating an action slot",
                 NativeMethods.GetWindowRect(testWindow.Handle, out rect) &&
                 Rectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom) == moved && resizes > 0 &&

@@ -26,7 +26,6 @@ namespace PokerCaption.Engine
         private static readonly DialogAction TableClosed = new("This table has been closed", 0, TableCloseReason.Closed);
         private static readonly DialogAction TableConcluded = new("Play at this table has concluded", 0, TableCloseReason.Concluded);
         private static readonly DialogAction TournamentEnded = new("Tournament is over", 0, TableCloseReason.TournamentEnded);
-        private const string ReminderCaption = "Reminder: Your current sesson has been active for X hours";
         private const string PokerStarsDialogButtonClass = "PokerStarsButtonClass";
         private const string FlutterDialogButtonClass = "FlutterOnlinePokerButtonClass";
         private const string NativeDialogClass = "#32770";
@@ -38,12 +37,10 @@ namespace PokerCaption.Engine
         private const uint TextTimeoutMs = 40;
         private const int TextCapacity = 2048;
         private const int MaxDialogLabels = 16;
-        private const int RenderedDialogTextLength = 199;
         private const int PollIntervalMs = 100;
         private const int ScanIntervalMs = 500;
         private const int TableCloseRetryMs = 3000;
         private static readonly Regex Whitespace = new(@"\s+", RegexOptions.CultureInvariant);
-        private const string LogoutCaption = "PokerStars Logout Information";
 
         // Old [AutoDialog] rows otherwise fall back to generic title matching.
         private static readonly HashSet<string> RemovedOptionCaptions = new(StringComparer.OrdinalIgnoreCase)
@@ -55,6 +52,12 @@ namespace PokerCaption.Engine
             "Feedback for PokerStars", "Responsible Gaming", "Confirm Waiting List", "Auto close table in waiting list",
             "Your auto-rebuy was restricted to", "You did not act in time, this seat is no longer reserved for you",
             "Tournament Registration / Show Lobby", "Tournament Registration / Welcome to the tournament",
+            "You have been unregistered from", "Would you like to register into another Satellite?",
+            "PokerStars Logout Information", "Reminder: Your current sesson has been active for X hours",
+            "You have been successfully removed from all the waiting list",
+            "You have been successfully removed from all the waiting lists",
+            "You reached the cap of cash game tables", "You are playing at too many tables",
+            "You are currently playing the maximum allowed Zoom tables at once",
         };
         private static readonly (string Key, string Title, string Button)[] ButtonOptions =
         {
@@ -172,34 +175,19 @@ namespace PokerCaption.Engine
             _pending.RemoveAll(entry => entry.Button != IntPtr.Zero
                 ? !_dialogButtons.ContainsKey(entry.Title)
                 : entry.Action.TableReason == TableCloseReason.None && (entry.Body == null
-                ? MatchDialog(entry.Title, entry.WindowClass, entry.IsDialog)
-                : MatchBody(entry.Title, entry.Body, entry.WindowClass, entry.IsDialog,
-                    combinedBody: UsesCombinedBody(entry.Action.Caption))) != entry.Action);
+                ? MatchDialog(entry.Title, entry.IsDialog)
+                : MatchBody(entry.Body, entry.IsDialog)) != entry.Action);
         }
 
-        private DialogAction MatchDialog(string title, string windowClass, bool isDialog)
+        private DialogAction MatchDialog(string title, bool isDialog)
         {
             if (string.IsNullOrWhiteSpace(title)) return null;
-
-            return _rules.FirstOrDefault(rule => MatchesCaption(title, rule.Caption, windowClass, isDialog));
+            return _rules.FirstOrDefault(rule => _optionCaptions.TryGetValue(rule.Caption, out var caption)
+                ? isDialog && SameTitle(Normalize(title), caption)
+                : title.Contains(rule.Caption, StringComparison.OrdinalIgnoreCase));
         }
 
-        private bool MatchesCaption(string title, string caption, string windowClass, bool isDialog)
-        {
-            if (!_optionCaptions.TryGetValue(caption, out var optionCaption))
-                return title.Contains(caption, StringComparison.OrdinalIgnoreCase);
-            if (optionCaption == ReminderCaption) return false;
-            if (optionCaption == LogoutCaption)
-                return windowClass == NativeDialogClass && title.Equals(LogoutCaption, StringComparison.Ordinal);
-            return isDialog && MatchesOptionText(Normalize(title), optionCaption);
-        }
-
-        private static bool MatchesOptionText(string text, string optionCaption) =>
-            SameTitle(text, optionCaption) ||
-            (optionCaption == "You have been unregistered from" && StartsWithPhrase(text, optionCaption));
-
-        private DialogAction MatchBody(string title, string body, string windowClass, bool isDialog,
-            bool tableMessage = false, bool combinedBody = false)
+        private DialogAction MatchBody(string body, bool isDialog, bool tableMessage = false)
         {
             if (!isDialog || string.IsNullOrWhiteSpace(body)) return null;
             string text = Normalize(body);
@@ -211,24 +199,8 @@ namespace PokerCaption.Engine
             }
 
             return _rules.FirstOrDefault(rule =>
-                _optionCaptions.TryGetValue(rule.Caption, out var caption) &&
-                caption != LogoutCaption && UsesCombinedBody(caption) == combinedBody &&
-                MatchesDialogBody(title, body, text, windowClass, caption));
+                _optionCaptions.TryGetValue(rule.Caption, out var caption) && SameTitle(text, caption));
         }
-
-        private static bool UsesCombinedBody(string caption) => caption == ReminderCaption;
-
-        private static bool MatchesDialogBody(string title, string body, string normalized, string windowClass, string caption) => caption switch
-        {
-            ReminderCaption => windowClass == NativeDialogClass && title.Length == 0 &&
-                (body.StartsWith("Reminder:Yourcurrentsession", StringComparison.Ordinal) ||
-                 body.StartsWith("Reminder: Your current session", StringComparison.Ordinal)),
-            _ => MatchesOptionText(normalized, caption),
-        };
-
-        private static bool StartsWithPhrase(string text, string phrase) =>
-            text.StartsWith(phrase, StringComparison.OrdinalIgnoreCase) &&
-            (text.Length == phrase.Length || " .!?:,(".Contains(text[phrase.Length]));
 
         private static string Normalize(string text) => Whitespace.Replace(text.Trim(), " ");
 
@@ -242,17 +214,14 @@ namespace PokerCaption.Engine
             bool isDialog = IsDialogWindow(window, owner, windowClass);
             string buttonText = null;
             bool tableMessage;
-            bool collectCombinedBody;
             lock (_state)
             {
                 tableMessage = isDialog && _closureTables.Contains(GetWindow(window, OwnerWindow));
-                var action = MatchDialog(title, windowClass, isDialog);
+                var action = MatchDialog(title, isDialog);
                 if (action != null)
                     return new PendingClose(window, owner, title, windowClass, isDialog, action, tickCount + action.DelayMs);
                 if (windowClass == NativeDialogClass) _dialogButtons.TryGetValue(title, out buttonText);
                 if (!isDialog || (_rules.Count == 0 && !tableMessage && buttonText == null)) return null;
-                collectCombinedBody = windowClass == NativeDialogClass && (title.Length == 0 || title == "Find a Player") &&
-                    _rules.Any(rule => UsesCombinedBody(rule.Caption));
             }
 
             if (buttonText != null)
@@ -265,8 +234,6 @@ namespace PokerCaption.Engine
             // This rule also checks the text of the dialog's child controls.
             PendingClose match = null;
             int labels = 0;
-            var combinedBody = collectCombinedBody ? new StringBuilder(RenderedDialogTextLength) : null;
-            bool completeEnumeration = true;
             NativeMethods.EnumChildWindows(window, (child, _) =>
             {
                 string childClass = TableScanner.GetClass(child);
@@ -274,33 +241,20 @@ namespace PokerCaption.Engine
                 if (++labels > MaxDialogLabels || !TryReadControlText(child, out var text))
                 {
                     match = null;
-                    completeEnumeration = false;
                     return false;
                 }
-                if (combinedBody != null)
-                    combinedBody.Append(text, 0, Math.Min(text.Length, RenderedDialogTextLength - combinedBody.Length));
                 DialogAction candidate;
-                lock (_state) candidate = MatchBody(title, text, windowClass, isDialog, tableMessage);
+                lock (_state) candidate = MatchBody(text, isDialog, tableMessage);
                 if (candidate == null) return true;
                 if (match != null && match.Action != candidate)
                 {
                     match = null;
-                    completeEnumeration = false;
                     return false;
                 }
                 match ??= new PendingClose(window, owner, title, windowClass, isDialog, candidate, tickCount + candidate.DelayMs)
                     { Body = text };
                 return true;
             }, IntPtr.Zero);
-            if (match == null && completeEnumeration && combinedBody is { Length: > 0 })
-            {
-                string body = combinedBody.ToString();
-                DialogAction candidate;
-                lock (_state) candidate = MatchBody(title, body, windowClass, isDialog, combinedBody: true);
-                if (candidate != null)
-                    match = new PendingClose(window, owner, title, windowClass, isDialog, candidate, tickCount + candidate.DelayMs)
-                    { Body = body };
-            }
             return match;
         }
 

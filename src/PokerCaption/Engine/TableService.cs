@@ -280,6 +280,7 @@ namespace PokerCaption.Engine
                 }
             }
             t.AmountToCall = null;
+            t.DisplayedRaiseTo = null;
             t.SeatStacks.Clear();
             t.SeatBounds.Clear();
             t.SeatActions.Clear();
@@ -341,6 +342,9 @@ namespace PokerCaption.Engine
                     var call = System.Text.RegularExpressions.Regex.Match(text, @"^Call\s+([\d.,]+)",
                         System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                     if (call.Success) t.AmountToCall = ToUnits(TitleParser.ParseMoney(call.Groups[1].Value));
+                    var raiseTo = System.Text.RegularExpressions.Regex.Match(text, @"^Raise\s+To\s+([\d.,]+)",
+                        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    if (raiseTo.Success) t.DisplayedRaiseTo = ToUnits(TitleParser.ParseMoney(raiseTo.Groups[1].Value));
                 }
             }
             if (scanStatus != SharedMemory.CocosScanStatus.Walked) return;

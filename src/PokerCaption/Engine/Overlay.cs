@@ -22,21 +22,30 @@ namespace PokerCaption.Engine
         internal static Color Key => KeyColor;
 
         public bool ClickThrough { get; }
+        private readonly IntPtr _tableOwner;
 
-        public OverlayWindow(bool clickThrough)
+        public OverlayWindow(bool clickThrough, IntPtr tableOwner = default)
         {
             ClickThrough = clickThrough;
+            _tableOwner = tableOwner;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
             BackColor = KeyColor;
             TransparencyKey = KeyColor;
-            TopMost = true;
+            TopMost = tableOwner == IntPtr.Zero;
             ShowInTaskbar = false;
             DoubleBuffered = true;
         }
 
         protected override bool ShowWithoutActivation => true;
+
+        internal void ShowOwned()
+        {
+            if (!Visible) Show(new TableHandle(_tableOwner));
+        }
+
+        private sealed record TableHandle(IntPtr Handle) : IWin32Window;
 
         protected override CreateParams CreateParams
         {
@@ -67,7 +76,7 @@ namespace PokerCaption.Engine
         private Point _dragCursor, _dragOrigin;
         public bool Dragging => _dragButton != MouseButtons.None;
 
-        public HudTextPanel(bool clickThrough) : base(clickThrough)
+        public HudTextPanel(bool clickThrough, IntPtr tableOwner = default) : base(clickThrough, tableOwner)
         {
             if (!clickThrough)
             {

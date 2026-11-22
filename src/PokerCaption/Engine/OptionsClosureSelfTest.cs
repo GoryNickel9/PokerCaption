@@ -69,24 +69,10 @@ public sealed partial class AutoDialogEngine
             const int delay = 0;
             config.Set("AutoDialog", "Delay0", delay);
             engine.Load(config);
-            var (title, label, childClass) = caption switch
-            {
-
-                ReminderCaption => ("", "Reminder: Your current session has been active for 3 hours", "Static"),
-
-                _ => (caption, (string)null, "Static"),
-            };
             check("Options WinForms dialog " + caption,
-                Exercise(title, label, childClass, delayMs: delay) &&
+                Exercise(caption, null, delayMs: delay) &&
+                Exercise("Other dialog", caption, delayMs: delay) &&
                 Exercise(caption, null, modal: false, delayMs: delay, expectClose: false), "");
-            if (caption == LogoutCaption)
-                check("Options WinForms exact title " + caption, Exercise(title.ToLowerInvariant(), null, expectClose: false) &&
-                    Exercise("Other dialog", title, expectClose: false), "");
-            if (caption == ReminderCaption)
-                check("Options WinForms reminder prefixes", Exercise("", "Reminder:Yourcurrentsession has been active") &&
-                    Exercise("Session", label, expectClose: false) &&
-                    Exercise("", "Reminder: Your current ", otherLabel: "session has been active") &&
-                    Exercise("", "Another message", otherLabel: label, expectClose: false), "");
         }
 
         foreach (var (key, caption) in new[]
@@ -159,7 +145,7 @@ public sealed partial class AutoDialogEngine
         oldConfig.Set("AutoDialog", "Caption1", "This seat is reserved for players on the waiting list");
         oldConfig.Set("AutoDialog", "Caption2", "This seat is occupied.");
         oldConfig.Set("AutoDialog", "Caption3", "My News");
-        oldConfig.Set("AutoDialog", "Caption4", LogoutCaption);
+        oldConfig.Set("AutoDialog", "Caption4", "table is closed");
         engine.Load(oldConfig);
         check("Options WinForms legacy table cap rule is inert", Exercise("Table Cap Reached", null, expectClose: false), "");
         check("Options WinForms legacy seat reserved rule is inert",
@@ -167,7 +153,7 @@ public sealed partial class AutoDialogEngine
         check("Options WinForms legacy seat occupied rule is inert",
             Exercise("This seat is occupied.", null, expectClose: false), "");
         check("Options WinForms retired news rule is inert", Exercise("My News", null, expectClose: false), "");
-        check("Options WinForms legacy filtering preserves other rules", Exercise(LogoutCaption, null), "");
+        check("Options WinForms legacy filtering preserves other rules", Exercise("table is closed", null), "");
 
         foreach (var (key, title, buttonText) in ButtonOptions)
         {

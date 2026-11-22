@@ -57,8 +57,7 @@ namespace PokerCaption.Engine
             int turn = t.BetScriptTurn;
             if (t.LastPrefilledTurn == turn || t.Pot <= 0 || t.Stack <= 0) return null;
             bool coords = t.Editor == IntPtr.Zero;
-            if (coords && (ClientProfile.Interaction != "coords" ||
-                Native.NativeMethods.GetForegroundWindow() != t.Hwnd || Native.NativeMethods.IsInMoveSize(t.Hwnd))) return null;
+            if (coords && (ClientProfile.Interaction != "coords" || Native.NativeMethods.IsInMoveSize(t.Hwnd))) return null;
 
             string currentText = coords ? null : TableScanner.GetText(t.Editor, 64);
             double? betBox = !string.IsNullOrWhiteSpace(currentText) &&
@@ -76,7 +75,9 @@ namespace PokerCaption.Engine
             {
                 if (!ClientProfile.Points.TryGetValue("BetBox", out var box)) return null;
                 box = BetBoxPoint(box);
-                if (!IsBetBoxPoint(box) || !CoordsEngine.TypeInto(t.Hwnd, box.X, box.Y, text, foregroundOnly: true))
+                if (!IsBetBoxPoint(box) ||
+                    (!CoordsEngine.TypeInto(t.Hwnd, box.X, box.Y, text, foregroundOnly: true) &&
+                     !CoordsEngine.PostAmount(t.Hwnd, box.X, box.Y, text)))
                 {
                     if (Log) _log($"bet[{t.TableName}] bet box unavailable; amount '{text}' was not sent");
                     return null;
@@ -91,9 +92,17 @@ namespace PokerCaption.Engine
         }
 
         internal static string FormatForBetBox(Preview result, TableInfo table, bool coords) =>
-            coords && table.BetBoxInBb
-                ? FormulaEval.Format(result.Amount.Value / table.Bb, result.Decimals)
-                : result.Text;
+            FormulaEval.Format(AmountForBetBox(result.Amount.Value, table) /
+                (coords && table.BetBoxInBb ? table.Bb : 1), result.Decimals);
+
+        internal static double AmountForBetBox(double amount, TableInfo table)
+        {
+            // If the formula cannot even cover the call, use the legal raise shown by the client.
+            if (table.AmountToCall is double call && call > 0 && amount <= call &&
+                table.DisplayedRaiseTo is double raiseTo && raiseTo > call)
+                return raiseTo;
+            return amount;
+        }
 
         // The previous stock point overlaps the slider at the standard slot size.
         internal static (float X, float Y) BetBoxPoint((float X, float Y) point) =>

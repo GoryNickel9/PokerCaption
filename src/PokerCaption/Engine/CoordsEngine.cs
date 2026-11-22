@@ -24,6 +24,7 @@ namespace PokerCaption.Engine
         [DllImport("user32.dll")] private static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, UIntPtr dwExtraInfo);
         [DllImport("user32.dll", SetLastError = true)] private static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint flags);
 
+        private const int MaximumAmountLength = 16;
         const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
         const uint MOUSEEVENTF_LEFTUP = 0x0004;
         const uint MOUSEEVENTF_WHEEL = 0x0800;
@@ -60,11 +61,10 @@ namespace PokerCaption.Engine
                 return false;
             const ushort endScan = 0x4F, backspaceScan = 0x0E;
             const uint extendedKey = 1, keyUp = 2, unicode = 4, scanCode = 8;
-            const int maximumAmountLength = 16;
             // The rendered client uses scan codes for editing keys and Unicode events for digits.
-            var inputs = new List<INPUT>(2 + maximumAmountLength * 2 + text.Length * 2)
+            var inputs = new List<INPUT>(2 + MaximumAmountLength * 2 + text.Length * 2)
             { Keyboard(endScan, scanCode | extendedKey), Keyboard(endScan, scanCode | extendedKey | keyUp) };
-            for (int i = 0; i < maximumAmountLength; i++)
+            for (int i = 0; i < MaximumAmountLength; i++)
             {
                 inputs.Add(Keyboard(backspaceScan, scanCode));
                 inputs.Add(Keyboard(backspaceScan, scanCode | keyUp));
@@ -79,6 +79,44 @@ namespace PokerCaption.Engine
             if (sent % 2 != 0)
                 SendInput(1, [inputs[(int)sent]], INPUT.Size);
             return false;
+        }
+
+        internal static bool PostAmount(IntPtr hwnd, double nx, double ny, string text)
+        {
+            if (!NativeMethods.IsWindowVisible(hwnd) || IsIconic(hwnd) ||
+                NativeMethods.IsInMoveSize(hwnd) || text.Length is 0 or > MaximumAmountLength ||
+                text.Any(c => !(char.IsAsciiDigit(c) || c is '.' or ',')) ||
+                !NativeMethods.GetWindowRect(hwnd, out var bounds) ||
+                !NativeMethods.GetClientRect(hwnd, out var client)) return false;
+
+            var origin = new NativeMethods.POINT();
+            if (!NativeMethods.ClientToScreen(hwnd, ref origin)) return false;
+            var point = new NativeMethods.POINT
+            {
+                X = bounds.Left + (int)(nx * (bounds.Right - bounds.Left)) - origin.X,
+                Y = bounds.Top + (int)(ny * (bounds.Bottom - bounds.Top)) - origin.Y
+            };
+            if (point.X < 0 || point.X >= client.Right || point.Y < 0 || point.Y >= client.Bottom)
+                return false;
+
+            const uint mouseMove = 0x0200;
+            const int endKey = 0x23, endScan = 0x014F0001;
+            const int backspaceKey = 0x08, backspaceScan = 0x000E0001;
+            IntPtr mousePoint = (IntPtr)(point.X | (point.Y << 16));
+            bool Send(uint message, int wParam, IntPtr lParam) =>
+                NativeMethods.PostMessageW(hwnd, message, (IntPtr)wParam, lParam);
+            bool Key(int key, int scan) =>
+                Send(Input.WM_KEYDOWN, key, (IntPtr)scan) &&
+                Send(Input.WM_KEYUP, key, (IntPtr)unchecked((int)(0xC0000000 | scan)));
+
+            if (!Send(mouseMove, 0, mousePoint) || !Send(Input.WM_LBUTTONDOWN, (int)Input.MK_LBUTTON, mousePoint) ||
+                !Send(Input.WM_LBUTTONUP, 0, mousePoint) || !Key(endKey, endScan))
+                return false;
+            for (int i = 0; i < MaximumAmountLength; i++)
+                if (!Key(backspaceKey, backspaceScan)) return false;
+            foreach (char digit in text)
+                if (!Send(Input.WM_CHAR, digit, (IntPtr)1)) return false;
+            return true;
         }
 
         private static bool FocusBetBox(IntPtr hwnd, double nx, double ny)

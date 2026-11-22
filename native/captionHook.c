@@ -425,7 +425,8 @@ static void walk_node(void *node, int depth, struct TextCtx *ctx, int seat, enum
 
     if (hasText && ((role == TABLE_POT && wcsncmp(textW, L"Pot:", 4) == 0) ||
         (role == TABLE_STACK && textW[0] >= L'0' && textW[0] <= L'9') ||
-        (role == TABLE_ACTION && (wcscmp(textW, L"Check") == 0 || wcsncmp(textW, L"Call ", 5) == 0)) ||
+        (role == TABLE_ACTION && (wcscmp(textW, L"Check") == 0 || wcsncmp(textW, L"Call ", 5) == 0 ||
+         _wcsnicmp(textW, L"Raise To", 8) == 0)) ||
         role == TABLE_SEAT_ACTION)) {
         const wchar_t *kind = role == TABLE_POT ? L"bkg_totalpot" : role == TABLE_STACK ? L"Status" :
                               role == TABLE_SEAT_ACTION ? L"PlayerAction" : L"Action";

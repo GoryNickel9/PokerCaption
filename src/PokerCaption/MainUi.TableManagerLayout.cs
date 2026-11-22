@@ -41,7 +41,6 @@ internal sealed class TableManagerPanel : Panel
     private readonly NumericUpDown _left = Number(int.MinValue, int.MaxValue);
     private readonly NumericUpDown _top = Number(int.MinValue, int.MaxValue);
     private readonly NumericUpDown _width = Number(1, int.MaxValue);
-    private readonly NumericUpDown _height = Number(-1, int.MaxValue);
     private readonly Label _status = new() { AutoSize = true };
     private readonly Button _duplicate;
     private readonly Button _delete;
@@ -85,8 +84,7 @@ internal sealed class TableManagerPanel : Panel
         Field(_geometry, "Left", _left, 13, 22, 75);
         Field(_geometry, "Top", _top, 99, 22, 75);
         Field(_geometry, "Width", _width, 13, 75, 75);
-        Field(_geometry, "Height", _height, 99, 75, 75);
-        LabelAt(_geometry, "Use −1 for automatic height", 13, 121);
+        LabelAt(_geometry, "Height follows the table proportions", 13, 121);
 
         if (manager.RenderedClient)
             LabelAt(this, "Sisal uses home slots.\r\nWheel and automatic dialogs pause\r\nwhile Table Manager is enabled.", 513, 122);
@@ -102,7 +100,7 @@ internal sealed class TableManagerPanel : Panel
         });
         _profiles.SelectedIndexChanged += (_, _) => Run(SelectProfile);
         _slots.SelectedIndexChanged += (_, _) => { if (!_loading) DisplaySlot(); };
-        foreach (var control in new[] { _left, _top, _width, _height })
+        foreach (var control in new[] { _left, _top, _width })
             control.ValueChanged += (_, _) => UpdateSlot();
         Run(Reload);
     }
@@ -187,7 +185,6 @@ internal sealed class TableManagerPanel : Panel
         _left.Value = slot.Left;
         _top.Value = slot.Top;
         _width.Value = slot.Width;
-        _height.Value = Math.Max(-1, slot.Height);
         _loading = false;
     }
 
@@ -199,7 +196,6 @@ internal sealed class TableManagerPanel : Panel
         slot.Left = (int)_left.Value;
         slot.Top = (int)_top.Value;
         slot.Width = (int)_width.Value;
-        slot.Height = (int)_height.Value;
         _slots.Items[i] = SlotLabel(slot, i);
         if (IsCurrentLayout())
         {
@@ -215,7 +211,7 @@ internal sealed class TableManagerPanel : Panel
         var workArea = Screen.FromControl(this).WorkingArea;
         Slots.Add(new TableManagerConfig.Slot
         {
-            Left = workArea.Left, Top = workArea.Top, Width = 640, Height = 461
+            Left = workArea.Left, Top = workArea.Top, Width = 640
         });
         RefreshSlots(Slots.Count - 1);
         MarkDirty();
@@ -337,7 +333,7 @@ internal sealed class TableManagerPanel : Panel
     }
 
     private static string SlotLabel(TableManagerConfig.Slot slot, int i) =>
-        $"{i + 1}.  {slot.Left}, {slot.Top}   ·   {slot.Width} × {slot.EffectiveHeight}";
+        $"{i + 1}.  {slot.Left}, {slot.Top}   ·   {slot.Width} px";
 
     private static ComboBox Choice(string name, params string[] options)
     {
