@@ -143,8 +143,10 @@ internal static class DesktopWindow
         format.Multiline = true;
         format.Height = 63;
         fields.Controls.Add(Labeled("Format", format));
-        fields.Controls.Add(Row(Button(prefix + "AddTag", "Insert tag"), Check(prefix + "Visible", "Visible", true),
-            Button(prefix + "FontColor", "Text colour")));
+        var formatActions = Row(Button(prefix + "AddTag", "Insert tag"));
+        if (!isGeneral) formatActions.Controls.Add(Check(prefix + "Visible", "Visible", true));
+        formatActions.Controls.Add(Button(prefix + "FontColor", "Text colour"));
+        fields.Controls.Add(formatActions);
         if (isTable)
         {
             fields.Controls.Add(Row(Button("SpeedButton32", "Font"), Button("SpeedButton23", "Background"),
@@ -163,11 +165,7 @@ internal static class DesktopWindow
         }
         else if (isGeneral)
         {
-            fields.Controls.Add(Row(Button("generalHudFont", "Font"), Button("generalHudBackColor", "Background"),
-                Button("generalHudResetPosition", "Reset position")));
-            fields.Controls.Add(Row(Check("generalHudBackInvisible", "Transparent background")));
-            fields.Controls.Add(Labeled("Padding", Field("generalHudBorderWidth", "Padding", 65)));
-            fields.Controls.Add(Alignment("generalHudAlign", 1, "Alignment", "Left", "Centre", "Right"));
+            fields.Controls.Add(Row(Button("generalHudFont", "Font"), Button("generalHudBackColor", "Background")));
         }
         return page;
     }

@@ -35,10 +35,10 @@ namespace PokerCaption.Engine
 
     /// <summary>
     /// Motore dei tag: risolve `[nome]` nelle format string.
-    /// Tag supportati: BB SB BB100 totalPot(_bb) pot pot_bb
+    /// Tag supportati: BB100 pot pot_bb
     /// SPR effSPR flopEffSPR effStack(_bb) nplayers playersInHand
     /// handsCount allHandsCount allTrnys sessionTime handsPerHour
-    /// capt tableIdx RNG guarantee startingChips minStartStack
+    /// tableIdx RNG guarantee startingChips minStartStack
     /// avStartStack blindsTimer timeToAct timeFromAct maxTimeFromAct
     /// TM2_tableLocked TM2_tablesInSlot
     /// Condizioni (visibilità): [preflop] [postflop] [heroInHand] [heroAct] [!heroAct].
@@ -116,7 +116,6 @@ namespace PokerCaption.Engine
                 double v = baseTag switch
                 {
                     "pot" => t?.Pot ?? 0,
-                    "totalpot" => t?.Pot ?? 0,
                     "effstack" => t?.Stack ?? 0,
                     "stack" => t?.Stack ?? 0,
                     "bet" => t?.Bet ?? 0,
@@ -138,19 +137,13 @@ namespace PokerCaption.Engine
                     return "";
 
                 // --- tavolo ---
-                case "bb": return t?.Bb.ToString("0.###") ?? "0";
-                case "sb": return t?.Sb.ToString("0.###") ?? "0";
                 case "bb100": return t != null ? (t.Bb * 100).ToString("0.##") : "0";
-                case "totalpot":
                 case "pot": return t != null ? t.Pot.ToString("0.##") : "0";
-                case "pot_bb": case "totalpot_bb": return t != null ? BbOf(t.Pot) : "0";
-                case "tocall":
-                    return t?.AmountToCall is double call ? (inBb ? BbOf(call) : call.ToString("0.##")) : "-";
-                case "seatstacks":
+                case "tocall" when inBb:
+                    return t?.AmountToCall is double call ? BbOf(call) : "-";
+                case "seatstacks" when !inBb:
                     return t != null && t.SeatStacks.Count > 0
-                        ? string.Join(" | ", t.SeatStacks.OrderBy(x => x.Key).Select(x =>
-                            $"{x.Key}: {(inBb ? BbOf(x.Value) + " BB" : x.Value.ToString("0.##"))}"))
-                        : "-";
+                        ? string.Join(" | ", t.SeatStacks.OrderBy(x => x.Key).Select(x => $"{x.Key}: {x.Value:0.##}")) : "-";
                 case "spr": return t != null && t.Pot > 0 ? (t.Stack / t.Pot).ToString("0.##") : "-";
                 // effSPR: SPR sullo stack effettivo (stack al netto della call già in pot)
                 case "effspr": return t != null && t.Pot > 0 ? (Math.Max(t.Stack, 0.01) / t.Pot).ToString("0.##") : "-";
@@ -159,7 +152,6 @@ namespace PokerCaption.Engine
                 case "effstack_bb": return t != null ? BbOf(t.Stack) : "0";
                 case "nplayers": return t?.MaxSeats.ToString() ?? "0";
                 case "playersinhand": return t?.PlayersInHand.ToString() ?? "0";
-                case "capt": return t?.TableName ?? "";
                 case "tableidx": return t != null ? t.Slot.ToString() : "0";
                 case "tableidxconst": return t != null ? (t.Slot + 1).ToString() : "0";
                 case "startingchips": return t?.StartingChips.ToString("0.##") ?? "0";
@@ -174,13 +166,9 @@ namespace PokerCaption.Engine
                 case "tm2_tablesinslot": return t?.TablesInSlot.ToString() ?? "1";
                 case "sizing": return t?.Bet.ToString("0.##") ?? "0";
 
-                // pot odds (definizioni originali, strings dell'exe):
-                //  [:]  - pot odds for call (rapporto "x:1")
+                // Pot odds:
                 //  [%]  - pot odds for call in %  = call / (pot + call) * 100
                 //  [p%] - pot odds for push in %  = push / (pot + push) * 100
-                case ":":
-                    return t?.AmountToCall is double ratioCall && ratioCall > 0 && t.Pot > 0
-                        ? (t.Pot / ratioCall).ToString("0.##") + ":1" : "-";
                 case "%":
                     return t?.AmountToCall is double oddsCall && oddsCall > 0 && t.Pot > 0
                         ? (oddsCall / (t.Pot + oddsCall) * 100).ToString("0.#") : "-";

@@ -2,7 +2,6 @@ using System.Drawing;
 using System.Windows.Forms;
 using PokerCaption.Config;
 using PokerCaption.Engine;
-using PokerCaption.Native;
 
 namespace PokerCaption;
 
@@ -14,16 +13,16 @@ public sealed partial class MainUiController
     {
         var service = Program.Service;
         if (service != null)
-            _tableManagerPanel = AttachTableManager(form, service.Manager, Program.Ini, () => service.Tables);
+            _tableManagerPanel = AttachTableManager(form, service.Manager, Program.Ini);
     }
 
     internal static TableManagerPanel AttachTableManager(Form form, TableManagerEngine manager,
-        IniFile ini, Func<IReadOnlyList<TableInfo>> tables)
+        IniFile ini)
     {
         var page = TabPageByName(form, "Table manager");
         if (page == null) return null;
         foreach (var control in page.Controls.Cast<Control>().ToArray()) control.Dispose();
-        var panel = new TableManagerPanel(manager, ini, tables);
+        var panel = new TableManagerPanel(manager, ini);
         page.Controls.Add(panel);
         return panel;
     }
@@ -36,7 +35,6 @@ internal sealed class TableManagerPanel : Panel
     private static readonly Color Border = DesktopWindow.Border;
     private readonly TableManagerEngine _manager;
     private readonly IniFile _ini;
-    private readonly Func<IReadOnlyList<TableInfo>> _tables;
     private readonly ComboBox _profiles = Choice("Layout");
     private readonly CheckBox _enabled = new() { Text = "Enable Table Manager", AutoSize = true };
     private readonly ListBox _slots = new() { AccessibleName = "Slots", IntegralHeight = false };
@@ -46,31 +44,24 @@ internal sealed class TableManagerPanel : Panel
     private readonly NumericUpDown _width = Number(1, int.MaxValue);
     private readonly NumericUpDown _height = Number(-1, int.MaxValue);
     private readonly CheckBox _stack = new() { Text = "Allow multiple tables in this slot", AutoSize = true };
-    private readonly CheckBox _opened = new() { Text = "Move new tables to active slots", AutoSize = true };
-    private readonly CheckBox _fold = new() { Text = "Return to home slot after fold", AutoSize = true };
-    private readonly CheckBox _free = new() { Text = "Leave active tables in place", AutoSize = true };
-    private readonly CheckBox _hero = new() { Text = "Only tables where you've played", AutoSize = true };
     private readonly Label _status = new() { AutoSize = true };
     private readonly Button _duplicate;
     private readonly Button _delete;
     private readonly Button _apply;
     private readonly Button _add;
-    private readonly Button _capture;
     private readonly Button _remove;
     private readonly Button _up;
     private readonly Button _down;
     private readonly GroupBox _geometry = new() { Text = "Slot geometry", Name = "SlotGeometry" };
-    private readonly GroupBox _options = new() { Text = "Layout options" };
     private TableManagerConfig _draft;
     private TableManagerConfig.Slot[] _savedHomes;
     private bool _loading;
     private bool _dirty;
 
-    public TableManagerPanel(TableManagerEngine manager, IniFile ini, Func<IReadOnlyList<TableInfo>> tables)
+    public TableManagerPanel(TableManagerEngine manager, IniFile ini)
     {
         _manager = manager;
         _ini = ini;
-        _tables = tables;
         Dock = DockStyle.Fill;
         BackColor = Canvas;
         ForeColor = Ink;
@@ -86,8 +77,7 @@ internal sealed class TableManagerPanel : Panel
 
         var slotPanel = new GroupBox { Text = "Slots" };
         Put(this, slotPanel, 20, 116, 475, 365);
-        _add = ButtonAt(slotPanel, "Add slot", 14, 24, 78, () => AddSlot());
-        _capture = ButtonAt(slotPanel, "Use open table", 100, 24, 128, CaptureSlot);
+        _add = ButtonAt(slotPanel, "Add slot", 14, 24, 78, AddSlot);
         Put(slotPanel, _slots, 14, 63, 244, 241);
         _up = ButtonAt(slotPanel, "Up", 14, 316, 74, () => Reorder(-1));
         _down = ButtonAt(slotPanel, "Down", 94, 316, 87, () => Reorder(1));
@@ -103,16 +93,8 @@ internal sealed class TableManagerPanel : Panel
         Put(_geometry, _stack, 13, 218, 162, 45);
         _stack.AutoSize = false;
 
-        Put(this, _options, 513, 116, 237, 365);
-        Put(_options, _opened, 14, 28);
-        Put(_options, _fold, 14, 62);
-        Put(_options, _free, 14, 96);
-        Put(_options, _hero, 14, 130);
         if (manager.RenderedClient)
-        {
-            _opened.Enabled = _fold.Enabled = _free.Enabled = _hero.Enabled = false;
-            LabelAt(_options, "Sisal uses home slots only.\r\nHUD stays available. Automatic input\r\nis paused while the manager is enabled.", 14, 171);
-        }
+            LabelAt(this, "Sisal uses home slots.\r\nBetScript and other automatic input pause\r\nwhile Table Manager is enabled.", 513, 122);
 
         _apply = ButtonAt(this, "Save and activate", 20, 495, 132, Apply);
         _apply.BackColor = DesktopWindow.Accent;
@@ -129,8 +111,6 @@ internal sealed class TableManagerPanel : Panel
             control.ValueChanged += (_, _) => UpdateSlot();
         _binding.SelectedIndexChanged += (_, _) => UpdateSlot();
         _stack.CheckedChanged += (_, _) => UpdateSlot();
-        foreach (var check in new[] { _opened, _fold, _free, _hero })
-            check.CheckedChanged += (_, _) => UpdateOptions();
         Run(Reload);
     }
 
@@ -182,13 +162,7 @@ internal sealed class TableManagerPanel : Panel
             ? TableManagerConfig.Load(_manager.ConfigDir, name) : null;
         RememberSavedSlots();
         _dirty = false;
-        _loading = true;
-        _opened.Checked = _draft?.ActivateOpened == true;
-        _fold.Checked = _draft?.DeactivateAtFold == true;
-        _free.Checked = _draft?.FreeDesktop == true;
-        _hero.Checked = _draft?.WithHeroOnly == true;
-        _loading = false;
-        _duplicate.Enabled = _delete.Enabled = _apply.Enabled = _options.Enabled = _draft != null;
+        _duplicate.Enabled = _delete.Enabled = _apply.Enabled = _draft != null;
         RefreshSlots(0);
         UpdateStatus();
     }
@@ -209,7 +183,7 @@ internal sealed class TableManagerPanel : Panel
     private void DisplaySlot()
     {
         int i = _slots.SelectedIndex;
-        _add.Enabled = _capture.Enabled = Slots is { Count: < TableManagerConfig.MaxSlots };
+        _add.Enabled = Slots is { Count: < TableManagerConfig.MaxSlots };
         _geometry.Enabled = _remove.Enabled = i >= 0;
         _up.Enabled = i > 0;
         _down.Enabled = i >= 0 && i < Slots.Count - 1;
@@ -252,47 +226,16 @@ internal sealed class TableManagerPanel : Panel
         MarkDirty();
     }
 
-    private void UpdateOptions()
-    {
-        if (_loading || _draft == null) return;
-        _draft.ActivateOpened = _opened.Checked;
-        _draft.DeactivateAtFold = _fold.Checked;
-        _draft.FreeDesktop = _free.Checked;
-        _draft.WithHeroOnly = _hero.Checked;
-        MarkDirty();
-    }
-
-    private void AddSlot(Rectangle? bounds = null)
+    private void AddSlot()
     {
         if (Slots == null || Slots.Count >= TableManagerConfig.MaxSlots) return;
         var workArea = Screen.FromControl(this).WorkingArea;
-        var rect = bounds ?? new Rectangle(workArea.Left, workArea.Top, 640, 461);
         Slots.Add(new TableManagerConfig.Slot
         {
-            Left = rect.X, Top = rect.Y, Width = rect.Width, Height = rect.Height
+            Left = workArea.Left, Top = workArea.Top, Width = 640, Height = 461
         });
         RefreshSlots(Slots.Count - 1);
         MarkDirty();
-    }
-
-    private void CaptureSlot()
-    {
-        var tables = _tables().ToArray();
-        if (tables.Length == 0) { _status.Text = "No open tables detected."; return; }
-
-        using var dialog = Dialog("Choose an open table", 420, 270);
-        var list = new ListBox { AccessibleName = "Open tables" };
-        list.Items.AddRange(tables.Select(table => table.Title).ToArray());
-        list.SelectedIndex = 0;
-        Put(dialog, list, 12, 12, 396, 204);
-        DialogButtons(dialog, "Use table");
-        list.DoubleClick += (_, _) => { if (list.SelectedIndex >= 0) dialog.DialogResult = DialogResult.OK; };
-        if (dialog.ShowDialog(FindForm()) != DialogResult.OK || list.SelectedIndex < 0) return;
-        var table = tables[list.SelectedIndex];
-        if (NativeMethods.IsIconic(table.Hwnd) || !NativeMethods.GetWindowRect(table.Hwnd, out var r) ||
-            r.Right <= r.Left || r.Bottom <= r.Top)
-            throw new InvalidOperationException("Restore the selected table before capturing its position.");
-        AddSlot(Rectangle.FromLTRB(r.Left, r.Top, r.Right, r.Bottom));
     }
 
     private void RemoveSlot()

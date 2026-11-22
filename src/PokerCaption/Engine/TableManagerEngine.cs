@@ -77,12 +77,12 @@ public sealed class TableManagerEngine
             _placements.Remove(closed);
         bool sortInputsChanged = closedTables.Length > 0;
 
-        var candidates = new List<TableInfo>(tables.Count);
+        var candidates = tables;
         foreach (var table in tables)
         {
             if (!_placements.TryGetValue(table, out var state))
             {
-                state = new Placement { OpenedActive = Config.ActivateOpened, LastBlind = table.Bb };
+                state = new Placement { OpenedActive = true, LastBlind = table.Bb };
                 _placements.Add(table, state);
                 sortInputsChanged = true;
             }
@@ -90,14 +90,6 @@ public sealed class TableManagerEngine
             {
                 state.LastBlind = table.Bb;
                 sortInputsChanged = true;
-            }
-            if (LayoutOnly || table.Locked || !Config.WithHeroOnly || table.HeroAct || table.HeroInHand || table.HandStamp > 0)
-                candidates.Add(table);
-            else
-            {
-                state.Home = state.Active = -1;
-                state.Bounds = null;
-                ClearSlot(table);
             }
         }
 
@@ -137,7 +129,6 @@ public sealed class TableManagerEngine
             bool wantsActive = table.HeroAct ||
                 state.OpenedActive ||
                 (table.InActiveSlot && table.HeroInHand);
-            if (Config.DeactivateAtFold && table.HeroFolded && !table.HeroAct) wantsActive = false;
             if (table.HeroAct || table.HeroInHand || table.HeroFolded) state.OpenedActive = false;
             if (state.Active >= 0 && (!wantsActive || sort)) state.Active = -1;
             if (state.Active >= 0) active[state.Active]++;
@@ -148,7 +139,7 @@ public sealed class TableManagerEngine
         foreach (var table in candidates)
         {
             var state = _placements[table];
-            if (table.Locked || !table.InActiveSlot || state.Active >= 0 || Config.FreeDesktop) continue;
+            if (table.Locked || !table.InActiveSlot || state.Active >= 0) continue;
             var binding = state.Home < 0 ? TableManagerConfig.AnyActiveSlot : homeSlots[state.Home].Bind;
             if (binding != TableManagerConfig.NoBinding)
                 state.Active = Claim(activeSlots, active, binding);
@@ -160,9 +151,8 @@ public sealed class TableManagerEngine
             var state = _placements[table];
             if (!table.Locked)
             {
-                bool free = table.InActiveSlot && Config.FreeDesktop;
-                table.InActiveSlot = state.Active >= 0 || free;
-                table.PlacedSlot = free ? -1 : state.Active >= 0 ? state.Active : state.Home;
+                table.InActiveSlot = state.Active >= 0;
+                table.PlacedSlot = state.Active >= 0 ? state.Active : state.Home;
                 var slots = state.Active >= 0 ? activeSlots : homeSlots;
                 if (table.PlacedSlot < 0) state.Bounds = null;
                 else

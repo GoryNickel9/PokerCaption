@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace PokerCaption.Config
 {
@@ -35,6 +36,25 @@ namespace PokerCaption.Config
                 entry.Key.Equals("AutoHideChat", StringComparison.OrdinalIgnoreCase) ||
                 entry.Key.Equals("CloseCantFound", StringComparison.OrdinalIgnoreCase) ||
                 entry.Key.Equals("CNFafter", StringComparison.OrdinalIgnoreCase));
+
+        internal static void MigrateTableHudFormats(IniFile ini)
+        {
+            var hud = ini.Find("HUD");
+            if (hud == null) return;
+            for (int i = 0; i < hud.Entries.Count; i++)
+            {
+                var entry = hud.Entries[i];
+                if (!Regex.IsMatch(entry.Key, @"^FormatStr\d+$", RegexOptions.IgnoreCase)) continue;
+                string format = Regex.Replace(entry.Value, @"\[(totalPot_bb|totalPot|toCall|seatStacks_bb|:|BB|SB|capt)\]",
+                    match => match.Groups[1].Value.ToLowerInvariant() switch
+                    {
+                        "totalpot_bb" => "[pot_bb]",
+                        "totalpot" => "[pot]",
+                        _ => ""
+                    }, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                hud.Entries[i] = new KeyValuePair<string, string>(entry.Key, format);
+            }
+        }
 
         public static PokerCaptionConfig CreateDefault(string iniPath)
         {
@@ -89,8 +109,6 @@ namespace PokerCaption.Config
     /// <summary>
     /// Caricatore dei config del Table manager (TableManagerConfigs\&lt;name&gt;):
     /// sezioni [inact] / [act] con slot left/top/width/(height)/bind/multislot
-    /// e [options] con deactivateAtFold/activateOpened/
-    /// freeDesktop/withHeroOnly.
     /// </summary>
     public sealed class TableManagerConfig
     {
@@ -113,7 +131,6 @@ namespace PokerCaption.Config
         public string Name;
         public List<Slot> InactiveSlots = new List<Slot>();
         public List<Slot> ActiveSlots = new List<Slot>();
-        public bool DeactivateAtFold, ActivateOpened, FreeDesktop, WithHeroOnly;
 
         public static string ProfilePath(string dir, string name)
         {
@@ -160,10 +177,6 @@ namespace PokerCaption.Config
             LoadSlots(f, "inact", cfg.InactiveSlots);
             LoadSlots(f, "act", cfg.ActiveSlots);
 
-            cfg.DeactivateAtFold = f.GetBool("options", "deactivateAtFold");
-            cfg.ActivateOpened = f.GetBool("options", "activateOpened");
-            cfg.FreeDesktop = f.GetBool("options", "freeDesktop");
-            cfg.WithHeroOnly = f.GetBool("options", "withHeroOnly");
             return cfg;
         }
 
@@ -176,10 +189,6 @@ namespace PokerCaption.Config
             WriteSlots(file, "act", ActiveSlots);
             file.Set("options", "autoSortTables", 1);
             file.Set("options", "autoSortTime", AutoSortDelayMs);
-            file.Set("options", "deactivateAtFold", DeactivateAtFold ? 1 : 0);
-            file.Set("options", "activateOpened", ActivateOpened ? 1 : 0);
-            file.Set("options", "freeDesktop", FreeDesktop ? 1 : 0);
-            file.Set("options", "withHeroOnly", WithHeroOnly ? 1 : 0);
             file.SaveAtomic(path, overwrite);
         }
 

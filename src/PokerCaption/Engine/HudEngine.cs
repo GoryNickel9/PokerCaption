@@ -314,7 +314,7 @@ namespace PokerCaption.Engine
                     string tooltip = def.OnHover switch
                     {
                         "General HUD" when Program.Service?.GenHud is { } general => string.Join(Environment.NewLine,
-                            general.Items.Where(item => item.Visible).Select(item => HudTags.Resolve(item.Format, ctx))),
+                            general.Items.Select(item => HudTags.Resolve(item.Format, ctx))),
                         "BB bet value" when t.Bet > 0 && t.Bb > 0 => $"{t.Bet / t.Bb:0.##} BB",
                         _ => ""
                     };

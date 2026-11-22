@@ -100,6 +100,7 @@ namespace PokerCaption
                 // SOLO le sezioni mancanti — le modifiche utente non vengono riscritte
                 LoadClientProfile();
                 Ini.SeedFrom(ClientProfileSource());
+                PokerCaptionConfig.MigrateTableHudFormats(Ini);
 
                 // session stats cumulative (global_stats, [GStats])
                 SessionStats.Current.Load(Path.Combine(AppDir, "global_stats"));
@@ -134,6 +135,7 @@ namespace PokerCaption
             ApplicationConfiguration.Initialize();
             Ini = new IniFile(null);
             Ini.SeedFrom(ClientProfileSource());
+            PokerCaptionConfig.MigrateTableHudFormats(Ini);
             using var service = new TableService(null, MainUiController.Log);
             Service = service;
             using var controller = new MainUiController();
@@ -167,7 +169,7 @@ namespace PokerCaption
             defaults.Set("Client", "ListClass", "FlutterOnlinePokerListWndClass");
             defaults.Set("Client", "ToolTipClass", "FlutterOnlinePokerToolTipClass");
             defaults.Set("HUD", "HudActive", "1");
-            defaults.Set("HUD", "FormatStr0", "Pot [totalPot_bb] BB");
+            defaults.Set("HUD", "FormatStr0", "Pot [pot_bb] BB");
             defaults.Set("HUD", "custom_x0", 326);
             defaults.Set("HUD", "custom_y0", 205);
             defaults.Set("HUD", "plFormatStr0", "[actions]");
@@ -344,8 +346,16 @@ namespace PokerCaption
             };
             var rv = HudTags.Resolve("[effSPR]", tc);
             Check("tag [effSPR]", rv == "4.17", "= " + rv); // 50/12: SPR sullo stack effettivo
-            var tp = HudTags.Resolve("[totalPot_bb]", new TagContext { Table = new TableInfo { Pot = 10, Bb = 2 } });
-            Check("tag [totalPot_bb]", tp == "5", "= " + tp);
+            var tp = HudTags.Resolve("[pot_bb]", new TagContext { Table = new TableInfo { Pot = 10, Bb = 2 } });
+            Check("tag [pot_bb]", tp == "5", "= " + tp);
+            var legacyHud = new IniFile(null);
+            const string retired = "[totalPot_bb][totalPot][toCall][seatStacks_bb][:][BB][SB][capt]";
+            legacyHud.Set("HUD", "FormatStr0", retired + "[toCall_bb][%]");
+            legacyHud.Set("HUD", "plFormatStr0", "[actions]");
+            PokerCaptionConfig.MigrateTableHudFormats(legacyHud);
+            Check("Retired HUD tags no longer resolve and saved table formats migrate", HudTags.Resolve(retired, tc) == retired &&
+                legacyHud.Get("HUD", "FormatStr0") == "[pot_bb][pot][toCall_bb][%]" &&
+                legacyHud.Get("HUD", "plFormatStr0") == "[actions]");
             Check("tag condizione heroAct", HudTags.Visible("[heroAct]", tc) && !HudTags.Visible("[heroAct]", new TagContext { Table = new TableInfo() }));
             Check("tag sconosciuto passthrough", HudTags.Resolve("[tagInesistente]", tc) == "[tagInesistente]");
             Check("tag [sessionTime]", HudTags.Resolve("[sessionTime]", new TagContext { Session = SessionStats.Current }).Contains(":"));
@@ -508,9 +518,12 @@ namespace PokerCaption
             Check("Player HUD omits missing seat values", HudTags.Resolve("[stack_bb][actions]", player) == "");
             Check("Add tag player catalog is seat-specific",
                 MainUiController.AvailableHudTags("plFormatStr").Select(s => s.Split(' ')[0])
-                    .SequenceEqual(new[] { "[stack_bb]", "[stack]", "[actions]", "[timing]" }));
+                    .SequenceEqual(new[] { "[actions]", "[timing]" }));
             Check("tag [p%] pot odds push", HudTags.Resolve("[p%]", tc) == "80.6", "= " + HudTags.Resolve("[p%]", tc));   // 50/62*100
-            Check("tag [:] pot odds ratio", HudTags.Resolve("[:]", tc) == "6:1", "= " + HudTags.Resolve("[:]", tc));      // 12/2
+            Check("HUD tag catalog removes General HUD RNG and keeps the supported table options",
+                !MainUiController.AvailableHudTags("formatStr").Any(tag => tag.StartsWith("[RNG]", StringComparison.Ordinal)) &&
+                MainUiController.AvailableHudTags("FormatStr").Select(tag => tag.Split(' ')[0])
+                    .SequenceEqual(["[toCall_bb]", "[%]", "[RNG]"]));
 
             // --- pannelli HUD (MainUi.HudPanels): scrittura UI ↔ lettura motori ---
             var tmpPanels = Path.Combine(Path.GetTempPath(), "sc_panels.ini");
@@ -524,19 +537,19 @@ namespace PokerCaption
             // Add new panel (General HUD): coda + Count
             var gsec = pin.GetOrAddSection("GenHUD");
             int gn = pin.GetInt("GenHUD", "Count", 0);
-            gsec["formatStr" + gn] = ""; gsec["frameWidth" + gn] = "0";
-            gsec["FColor" + gn] = "16777215"; gsec["FBkColor" + gn] = "6579300";
-            gsec["FAlign" + gn] = "1"; gsec["FSize" + gn] = "9";
+            gsec["formatStr" + gn] = "";
+            gsec["FColor" + gn] = "16777215"; gsec["FBkColor" + gn] = "4210752";
+            gsec["FSize" + gn] = "9";
             gsec["Count"] = (gn + 1).ToString(CultureInfo.InvariantCulture);
-            var gen = new GenHud(_ => { }); gen.Load(pin);
+            using var gen = new GenHud(_ => { }); gen.Load(pin);
             Check("GenHUD add -> engine items", gen.Items.Count == 5, gen.Items.Count + " item");
 
             // Delete panel (General HUD, indice 2) con reindicizzazione: Hands esce, [allHandsCount] sale a 2
             int rIdx = 2;
-            gsec.Entries.RemoveAll(e => System.Text.RegularExpressions.Regex.IsMatch(e.Key, "^(formatStr|frameWidth|FColor|FBkColor|FInvisibleBack|FAlign|FSize)" + rIdx + "$", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+            gsec.Entries.RemoveAll(e => System.Text.RegularExpressions.Regex.IsMatch(e.Key, "^(formatStr|FColor|FBkColor|FSize)" + rIdx + "$", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
             foreach (var kv in gsec.Entries.ToList())
             {
-                var m = System.Text.RegularExpressions.Regex.Match(kv.Key, "^(formatStr|frameWidth|FColor|FBkColor|FInvisibleBack|FAlign|FSize)(\\d+)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                var m = System.Text.RegularExpressions.Regex.Match(kv.Key, "^(formatStr|FColor|FBkColor|FSize)(\\d+)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                 if (m.Success && int.Parse(m.Groups[2].Value) > rIdx)
                     gsec[m.Groups[1].Value + (int.Parse(m.Groups[2].Value) - 1).ToString()] = kv.Value;
             }
@@ -544,6 +557,15 @@ namespace PokerCaption
             gen.Load(pin);
             Check("GenHUD delete + reindex", gen.Items.Count == 3 && gen.Items[2].Format == "[allHandsCount]",
                 gen.Items.Count + " item, #3='" + (gen.Items.Count > 2 ? gen.Items[2].Format : "?") + "'");
+            gsec["FVisible0"] = "0";
+            gsec["FInvisibleBack0"] = "1";
+            gsec["FBkColor0"] = "-1";
+            gen.Load(pin);
+            gen.OnTick();
+            var generalWindow = Application.OpenForms.OfType<GenHudWindow>().SingleOrDefault();
+            Check("General HUD renders every item with an opaque background despite legacy options",
+                generalWindow?.Boxes.Count == 3 && generalWindow.Boxes[0].Back == Color.FromArgb(64, 64, 64));
+            gen.Dispose();
 
             // Add new panel (Table panels): FormatStr2 senza Count → il motore lo vede
             var hsec = pin.GetOrAddSection("HUD");
@@ -617,10 +639,9 @@ namespace PokerCaption
             {
                 Check("Desktop shell exposes four workspaces",
                     ui.Text == "PokerCaption" && ui.Controls.Find("workspace", true).Single() is TabControl { TabCount: 4 });
-                var align = ui.Controls.Find("generalHudAlign", true).Single();
-                Check("General HUD alignment offers three choices and defaults to centre",
-                    align.Controls.OfType<RadioButton>().Count() == 3 &&
-                    align.Controls.OfType<RadioButton>().ElementAt(1).Checked);
+                Check("General HUD editor hides the retired controls",
+                    new[] { "generalHudAlign", "generalHudResetPosition", "generalHudVisible", "generalHudBackInvisible",
+                        "generalHudBorderWidth" }.All(name => ui.Controls.Find(name, true).Length == 0));
                 Check("HUD editor exposes all three panel families",
                     new[] { "tablePanelsList", "playerPanelsList", "generalHudPanelsList" }
                         .All(name => ui.Controls.Find(name, true).Single() is ListBox));

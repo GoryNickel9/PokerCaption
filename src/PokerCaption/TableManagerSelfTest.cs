@@ -43,6 +43,12 @@ internal static class TableManagerSelfTest
                 ConfigDir = dir
             };
             manager.Load(ini);
+            var opened = new TableInfo { Hwnd = (IntPtr)9 };
+            manager.OnTick(new[] { opened }, 900);
+            check("TM offers an active slot immediately when a new table opens", opened.InActiveSlot &&
+                opened.PlacedSlot == 1 && positions[opened.Hwnd].X == 900, "");
+            manager.Load(ini);
+            moves = 0;
             var first = new TableInfo { Hwnd = (IntPtr)1, HeroAct = true };
             var second = new TableInfo { Hwnd = (IntPtr)2, HeroAct = true };
             var third = new TableInfo { Hwnd = (IntPtr)3 };
@@ -67,7 +73,7 @@ internal static class TableManagerSelfTest
                 positions[second.Hwnd].X == 900 && moves == 5, "");
 
             using var form = new Form { ClientSize = new Size(790, 550), ShowInTaskbar = false };
-            var panel = new TableManagerPanel(manager, ini, () => tables);
+            var panel = new TableManagerPanel(manager, ini);
             form.Controls.Add(panel);
             form.Show();
             var controls = DesktopWindow.Descendants(panel).ToArray();
@@ -77,9 +83,9 @@ internal static class TableManagerSelfTest
             var slots = controls.OfType<ListBox>().Single();
             void Click(string caption) => controls.OfType<Button>().Single(c => c.Text == caption).PerformClick();
 
-            check("TM exposes a single home slot list and four layout options",
+            check("TM exposes a single home slot list without the retired options or capture button",
                 slots.Items.Count == 1 && !controls.OfType<ComboBox>().Any(c => c.AccessibleName == "Slot type") &&
-                controls.OfType<GroupBox>().Single(c => c.Text == "Layout options").Controls.OfType<CheckBox>().Count() == 4, "");
+                !controls.Any(c => c.Text is "Layout options" or "Use open table"), "");
             GeometryField("Left").Value = 950;
             GeometryField("Top").Value = 30;
             GeometryField("Width").Value = 850;
@@ -112,6 +118,10 @@ internal static class TableManagerSelfTest
 
             var windowConfig = new TableManagerConfig();
             var area = Screen.FromControl(form).WorkingArea;
+            using var testWindow = new Form { StartPosition = FormStartPosition.Manual, ShowInTaskbar = false,
+                Bounds = new Rectangle(area.Left + 25, area.Top + 25, 540, 360) };
+            testWindow.Show();
+            Application.DoEvents();
             var expected = new Rectangle(area.Left + 40, area.Top + 60, 400, 300);
             windowConfig.InactiveSlots.Add(new TableManagerConfig.Slot
             {
@@ -122,33 +132,37 @@ internal static class TableManagerSelfTest
             ini.Set("PokerCaption", "TableManagerOn", 1);
             var native = new TableManagerEngine(null) { ConfigDir = dir };
             native.Load(ini);
-            native.OnTick(new[] { new TableInfo { Hwnd = form.Handle } });
+            native.OnTick(new[] { new TableInfo { Hwnd = testWindow.Handle } });
+            Application.DoEvents();
             check("TM moves and sizes a local WinForms window through Win32",
-                NativeMethods.GetWindowRect(form.Handle, out var rect) &&
-                Rectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom) == expected, "");
+                NativeMethods.GetWindowRect(testWindow.Handle, out var rect) &&
+                Rectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom) == expected,
+                $"actual={testWindow.Bounds}, expected={expected}, state={testWindow.WindowState}");
 
             windowConfig.InactiveSlots[0].Left += 70;
             windowConfig.InactiveSlots[0].Width += 90;
             windowConfig.InactiveSlots[0].Bind = 0;
             windowConfig.ActiveSlots.Add(new TableManagerConfig.Slot { Left = expected.X + 150 });
-            windowConfig.WithHeroOnly = true;
             windowConfig.Save(dir, "native");
             native.RenderedClient = true;
             native.Load(ini);
             int resizes = 0;
-            form.Resize += (_, _) => resizes++;
-            var rendered = new TableInfo { Hwnd = form.Handle, HeroAct = true };
+            testWindow.Resize += (_, _) => resizes++;
+            var rendered = new TableInfo { Hwnd = testWindow.Handle, HeroAct = true };
             native.OnTick(new[] { rendered }, 1000);
+            Application.DoEvents();
             var moved = new Rectangle(expected.X + 70, expected.Y, expected.Width + 90, expected.Height);
             check("TM rendered-client mode sizes the home window without activating an action slot",
-                NativeMethods.GetWindowRect(form.Handle, out rect) &&
+                NativeMethods.GetWindowRect(testWindow.Handle, out rect) &&
                 Rectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom) == moved && resizes > 0 &&
-                !rendered.InActiveSlot && native.LayoutOnly, "");
-            form.Location = new Point(moved.X + 25, moved.Y + 20);
+                !rendered.InActiveSlot && native.LayoutOnly, $"actual={testWindow.Bounds}, expected={moved}, resizes={resizes}");
+            testWindow.Location = new Point(moved.X + 25, moved.Y + 20);
             int resizesBeforeReturn = resizes;
             native.OnTick(new[] { rendered }, 1250);
+            Application.DoEvents();
             check("TM returns a manually moved window to its assigned slot without resizing again",
-                form.Bounds == moved && resizes == resizesBeforeReturn, "");
+                testWindow.Bounds == moved && resizes == resizesBeforeReturn,
+                $"actual={testWindow.Bounds}, expected={moved}, resizes={resizes - resizesBeforeReturn}");
 
             File.WriteAllText(TableManagerConfig.ProfilePath(dir, "sorting"),
                 "[inact]\nleft0=100\nleft1=200\n[options]\nautoSortTables=0\nautoSortTime=100\n");

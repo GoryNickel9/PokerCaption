@@ -19,17 +19,10 @@ namespace PokerCaption
     ///    SpeedButton48/93 su/giù
     ///  - Player panels: Edit120 (plFormatStr_i), CheckBox91 (plFVisible_i),
     ///    SpeedButton52 (plFrameColor_i), SpeedButton53 'Add tag', SpeedButton58/59 su/giù
-    ///  - General HUD:   edGenHudFormatStr (formatStr_i), cbGenHudVisible (FVisible_i),
-    ///    edGenHudBWidth (frameWidth_i), sbGenHudFontColor (FColor_i), sbGenHudBkColor
-    ///    (FBkColor_i), cbGenHudBkInvisible (FInvisibleBack_i), sbGenHudFont (FSize_i),
-    ///    rgGenHudAlign (FAlign_i), sbGenHudAddTag, sbGenHudMoveUp/Dn,
-    ///    sbGenHudResetPos (left/top default), cbGenHudForceTop ([GenHUD] ForceTopmost)
+    ///  - General HUD: formato, font, colore del testo e sfondo.
     /// Il 'Add tag' apre il dialogo genHudAddTag e inserisce il
     /// tag al cursore. Ogni modifica: INI in memoria + salva su disco + ricarica
     /// il motore (come il pannello betscript).
-    /// Restano inerti: combo
-    /// OnClick/OnHover, gruppi 'Show panel' (condizioni), 'Bet formula', Background
-    /// dei pannelli tavolo/giocatore, Fixed width/Group/Rounded, Position ↔.
     /// </summary>
     public sealed partial class MainUiController
     {
@@ -47,21 +40,17 @@ namespace PokerCaption
         {
             "plFormatStr" => new[]
             {
-                "[stack_bb] - Player stack in big blinds", "[stack] - Player stack",
                 "[actions] - Player actions by street", "[timing] - Last action time in seconds"
             },
             "formatStr" => new[]
             {
                 "[allHandsCount] - Hands played in the session", "[sessionTime] - Session time",
-                "[handsPerHour] - Hands per hour", "[RNG] - Random number"
+                "[handsPerHour] - Hands per hour"
             },
             _ => new[]
             {
-                "[totalPot_bb] - Pot in big blinds", "[totalPot] - Pot",
-                "[toCall_bb] - Amount to call in big blinds", "[toCall] - Amount to call",
-                "[seatStacks_bb] - Stack by seat in big blinds", "[%] - Call pot odds as a percentage",
-                "[:] - Call pot odds as a ratio", "[BB] - Big blind", "[SB] - Small blind",
-                "[capt] - Table name", "[RNG] - Random number"
+                "[toCall_bb] - Amount to call in big blinds", "[%] - Call pot odds as a percentage",
+                "[RNG] - Random number"
             }
         };
 
@@ -81,8 +70,8 @@ namespace PokerCaption
             public string ColorKey;                        // chiave scritta da BtnFontColor
             public long ColorKeyDefault = 0xFFFFFF;        // default se la chiave manca
             // General HUD only
-            public string EdBorderWidth, EdX, EdY;         // EdX/EdY = posizione pannelli tavolo
-            public string BtnBkColor, ChkBkInvisible, BtnFont, RgAlign, BtnResetPos, ChkForceTop;
+            public string EdX, EdY;
+            public string BtnBkColor, BtnFont;
             public string BkColorKey = "FBkColor";
             public Action ReloadEngine;   // risincronizza il motore dopo la scrittura
         }
@@ -96,9 +85,8 @@ namespace PokerCaption
             RegexOptions.IgnoreCase);
         // [HUD] pannelli giocatore: tutte le chiavi pl*<i>
         private static readonly Regex RxPlayerPanelKey = new Regex("^(pl(?:[A-Za-z_]+|Drag[XY]\\d+_))(\\d+)$", RegexOptions.IgnoreCase);
-        // [GenHUD] item: formatStr/frameWidth/FColor/FBkColor/FInvisibleBack/FAlign/FSize/FVisible
         private static readonly Regex RxGenHudKey = new Regex(
-            "^(formatStr|frameWidth|FColor|FBkColor|FInvisibleBack|FAlign|FSize|FVisible)(\\d+)$",
+            "^(formatStr|FColor|FBkColor|FSize)(\\d+)$",
             RegexOptions.IgnoreCase);
 
         private void WireHudPanels(Form f)
@@ -130,15 +118,13 @@ namespace PokerCaption
                     },
                     new PanelKind
                     {
-                        Title = "General HUD", Section = "GenHUD", Primary = "formatStr", VisibleKey = "FVisible",
+                        Title = "General HUD", Section = "GenHUD", Primary = "formatStr",
                         IndexedKeys = RxGenHudKey, UseCount = true, ListName = "generalHudPanelsList",
                         BtnAdd = "generalHudAdd", BtnDelete = "generalHudDelete", BtnClone = null,
                         BtnUp = "generalHudMoveUp", BtnDown = "generalHudMoveDown",
-                        EdFormat = "generalHudFormatStr", ChkVisible = "generalHudVisible", BtnAddTag = "generalHudAddTag",
+                        EdFormat = "generalHudFormatStr", BtnAddTag = "generalHudAddTag",
                         BtnFontColor = "generalHudFontColor", ColorKey = "FColor", ColorKeyDefault = 0xFFFFFF,
-                        EdBorderWidth = "generalHudBorderWidth", BtnBkColor = "generalHudBackColor",
-                        ChkBkInvisible = "generalHudBackInvisible", BtnFont = "generalHudFont",
-                        RgAlign = "generalHudAlign", BtnResetPos = "generalHudResetPosition", ChkForceTop = "generalHudForceTopmost",
+                        BtnBkColor = "generalHudBackColor", BtnFont = "generalHudFont",
                         ReloadEngine = () => Program.Service?.GenHud?.Load(Program.Ini)
                     }
                 };
@@ -164,9 +150,8 @@ namespace PokerCaption
                     if (Ctl(f, k.EdFormat) is TextBox edFormat)
                         edFormat.TextChanged += (s, e) => PanelFormatChanged(f, k1, edFormat);
                     else Log("HUD panels: " + k.EdFormat + " (Format string) mancante");
-                    if (Ctl(f, k.ChkVisible) is CheckBox chkVis)
+                    if (k.ChkVisible != null && Ctl(f, k.ChkVisible) is CheckBox chkVis)
                         chkVis.CheckedChanged += (s, e) => PanelVisibleChanged(f, k1, chkVis);
-                    else Log("HUD panels: " + k.ChkVisible + " ('Visible') mancante");
                     WireColor(f, k1, k.BtnFontColor, k.ColorKey, k.ColorKeyDefault);
                     if (k.BtnAddTag != null)
                         WireBtn(f, k.BtnAddTag, () => InsertTag(f, k1), "'Add tag'");
@@ -177,26 +162,9 @@ namespace PokerCaption
                     if (k.Primary == "FormatStr") WireTablePanelOptions(f, k);
 
                     // extra General HUD
-                    if (k.EdBorderWidth != null) WireInt(f, k1, k.EdBorderWidth, "frameWidth", "Border width");
                     if (k.BtnBkColor != null) WireColor(f, k1, k.BtnBkColor, k.BkColorKey, 0x404040);
-                    if (Ctl(f, k.ChkBkInvisible) is CheckBox chkInv)
-                        chkInv.CheckedChanged += (s, e) => PanelFlagChanged(f, k1, "FInvisibleBack", chkInv.Checked, "sfondo invisibile");
                     if (Ctl(f, k.BtnFont) is Button btnFont)
                         btnFont.Click += (s, e) => PickPanelFont(f, k1);
-                    if (k.RgAlign != null && Ctl(f, k.RgAlign) is Control rgAlign)
-                        foreach (var rb in rgAlign.Controls.OfType<RadioButton>())
-                            rb.CheckedChanged += (s, e) => { if (rb.Checked) PanelAlignChanged(f, k1, rgAlign); };
-                    if (Ctl(f, k.BtnResetPos) is Button btnReset)
-                        btnReset.Click += (s, e) => PanelResetPos(f, k1);
-                    if (Ctl(f, k.ChkForceTop) is CheckBox chkForce)
-                        chkForce.CheckedChanged += (s, e) =>
-                        {
-                            if (_panelsSync) return;
-                            int i = SelectedIndex(f, k1);
-                            if (i < 0) return;
-                            Program.Ini.Set(k1.Section, "ForceTopmost", chkForce.Checked ? "1" : "0");
-                            PersistPanelField(f, k1, i, updateRow: false);
-                        };
 
                     FillPanelList(f, k); // riempie e scatena PanelSelected → pannello proprietà
                 }
@@ -270,18 +238,12 @@ namespace PokerCaption
             {
                 if (Ctl(f, k.EdFormat) is TextBox ed)
                     ed.Text = i >= 0 ? (Program.Ini.Get(k.Section, k.Primary + i) ?? "") : "";
-                if (Ctl(f, k.ChkVisible) is CheckBox chkVis)
+                if (k.ChkVisible != null && Ctl(f, k.ChkVisible) is CheckBox chkVis)
                     chkVis.Checked = i < 0 || Program.Ini.GetBool(k.Section, k.VisibleKey + i, true);
-                if (k.EdBorderWidth != null && Ctl(f, k.EdBorderWidth) is TextBox edBw)
-                    edBw.Text = i < 0 ? "0" : Program.Ini.GetInt(k.Section, "frameWidth" + i, 0).ToString(CultureInfo.InvariantCulture);
                 if (k.EdX != null && Ctl(f, k.EdX) is TextBox edX)
                     edX.Text = i < 0 ? "0" : Program.Ini.GetDouble(k.Section, "custom_x" + i, 0).ToString("0.####", CultureInfo.InvariantCulture);
                 if (k.EdY != null && Ctl(f, k.EdY) is TextBox edY)
                     edY.Text = i < 0 ? "0" : Program.Ini.GetDouble(k.Section, "custom_y" + i, 0).ToString("0.####", CultureInfo.InvariantCulture);
-                if (k.ChkBkInvisible != null && Ctl(f, k.ChkBkInvisible) is CheckBox chkInv)
-                    chkInv.Checked = i >= 0 && Program.Ini.GetBool(k.Section, "FInvisibleBack" + i, false);
-                if (k.RgAlign != null && Ctl(f, k.RgAlign) is Control rg)
-                    SetRadioIndex(rg, i < 0 ? 1 : Math.Max(0, Math.Min(2, Program.Ini.GetInt(k.Section, "FAlign" + i, 1))));
                 if (k.Primary == "FormatStr") ReadTablePanelOptions(f, k, i);
             }
             finally { _panelsSync = false; }
@@ -452,21 +414,7 @@ namespace PokerCaption
             catch (Exception ex) { Log("HUD panels flag ERR: " + ex.Message); }
         }
 
-        private void PanelAlignChanged(Form f, PanelKind k, Control rg)
-        {
-            if (_panelsSync) return;
-            try
-            {
-                int i = SelectedIndex(f, k);
-                if (i < 0) return;
-                SetPanelKey(k, "FAlign" + i, RadioIndex(rg).ToString(CultureInfo.InvariantCulture));
-                PersistPanelField(f, k, i, updateRow: false);
-                Log("HUD panels " + k.Title + ": align #" + (i + 1) + " = " + RadioIndex(rg));
-            }
-            catch (Exception ex) { Log("HUD panels align ERR: " + ex.Message); }
-        }
-
-        /// <summary>TextEdit numerico intero (es. Border width del General HUD).</summary>
+        /// <summary>Collega un campo intero alla configurazione del pannello.</summary>
         private void WireInt(Form f, PanelKind k, string ctlName, string key, string what)
         {
             if (Ctl(f, ctlName) is TextBox ed)
@@ -548,22 +496,6 @@ namespace PokerCaption
                 Log("HUD panels " + k.Title + ": font size #" + (i + 1) + " = " + (int)Math.Round(dlg.Font.Size));
             }
             catch (Exception ex) { Log("HUD panels font ERR: " + ex.Message); }
-        }
-
-        /// <summary>'Reset position' del General HUD: left/top ai default (4, 938).</summary>
-        private void PanelResetPos(Form f, PanelKind k)
-        {
-            try
-            {
-                if (_panelsSync) return;
-                int i = SelectedIndex(f, k);
-                if (i < 0) return;
-                Program.Ini.Set(k.Section, "left", "4");
-                Program.Ini.Set(k.Section, "top", "938");
-                PersistPanelField(f, k, i, updateRow: false);
-                Log("HUD panels " + k.Title + ": posizione resettata (4, 938)");
-            }
-            catch (Exception ex) { Log("HUD panels resetpos ERR: " + ex.Message); }
         }
 
         // ---------- radio group (TRadioGroup del builder) ----------
@@ -736,12 +668,9 @@ namespace PokerCaption
                     break;
                 default: // item [GenHUD]
                     sec["formatStr" + n] = "";
-                    sec["frameWidth" + n] = "0";
                     sec["FColor" + n] = "16777215";   // bianco
-                    sec["FBkColor" + n] = "6579300";  // grigio 0x404040
-                    sec["FAlign" + n] = "1";
+                    sec["FBkColor" + n] = "4210752";  // grigio 0x404040
                     sec["FSize" + n] = "9";
-                    sec["FVisible" + n] = "1";
                     break;
             }
         }

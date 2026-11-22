@@ -39,7 +39,6 @@ namespace PokerCaption.Engine
 
             BuildActionSymbolsGrid();
             BuildTimings();
-            BuildHints();
 
             var ok = new Button { Text = "Ok", Location = new Point(10, ClientSize.Height - 32), Size = new Size(75, 26) };
             var cancel = new Button { Text = "Cancel", Location = new Point(95, ClientSize.Height - 32), Size = new Size(75, 26) };
@@ -99,22 +98,6 @@ namespace PokerCaption.Engine
             _addTimings = new CheckBox { Text = "Add timings", Location = new Point(10, 16), AutoSize = true };
             g.Controls.Add(_addTimings);
             Controls.Add(g);
-        }
-
-        // ---------- hint blu ----------
-        private void BuildHints()
-        {
-            var hint1 = new Label
-            {
-                Text = "use # here as a bet number (#b displays as 3b, 4b, etc.)",
-                Location = new Point(346, 64), AutoSize = true, ForeColor = Color.RoyalBlue
-            };
-            var hint2 = new Label
-            {
-                Text = "use [=/] to display each street at a new line",
-                Location = new Point(346, 84), AutoSize = true, ForeColor = Color.RoyalBlue
-            };
-            Controls.Add(hint1); Controls.Add(hint2);
         }
 
         // ---------- load/save ----------

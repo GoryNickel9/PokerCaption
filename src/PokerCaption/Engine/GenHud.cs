@@ -9,8 +9,7 @@ namespace PokerCaption.Engine
     /// <summary>
     /// General HUD: pannelli fissi sul desktop con i tag
     /// di sessione (default: Session time + [sessionTime], Hands + [allHandsCount]).
-    /// Formato reale: Count, formatStrN, FColorN, FBkColorN, FAlignN, FSizeN,
-    /// frameWidthN, FVisibleN, FInvisibleBackN, left/top, active.
+    /// Configurazione: Count, formatStrN, FColorN, FBkColorN, FSizeN, left/top e active.
     /// </summary>
     public sealed class GenHud : IDisposable
     {
@@ -18,13 +17,8 @@ namespace PokerCaption.Engine
         {
             public string Format;
             public Color Color = Color.Empty;
-            public Color Back = Color.Empty;
-            public int Align = 1;
+            public Color Back;
             public int Size = 9;
-            public int FrameWidth;
-            public bool Visible = true;       // FVisible_i (checkbox 'Visible' del pannello proprietà)
-            public bool InvisibleBack;        // FInvisibleBack_i: sfondo trasparente
-            public string StaticPrefix;
         }
 
         public readonly List<Item> Items = new List<Item>();
@@ -48,16 +42,13 @@ namespace PokerCaption.Engine
             {
                 var f = ini.Get("GenHUD", "formatStr" + i);
                 if (f == null) continue;
+                var back = IniColors.FromInt(ini.GetLong("GenHUD", "FBkColor" + i, 0x404040));
                 Items.Add(new Item
                 {
                     Format = f,
                     Color = IniColors.FromInt(ini.GetLong("GenHUD", "FColor" + i, 0xFFFFFF)),
-                    Back = IniColors.FromInt(ini.GetLong("GenHUD", "FBkColor" + i, 0x404040)),
-                    Align = Math.Max(0, Math.Min(2, ini.GetInt("GenHUD", "FAlign" + i, 1))),
-                    Size = ini.GetInt("GenHUD", "FSize" + i, 9),
-                    FrameWidth = ini.GetInt("GenHUD", "frameWidth" + i, 0),
-                    Visible = ini.GetBool("GenHUD", "FVisible" + i, true),
-                    InvisibleBack = ini.GetBool("GenHUD", "FInvisibleBack" + i, false)
+                    Back = back.A == 0 ? Color.FromArgb(64, 64, 64) : back,
+                    Size = ini.GetInt("GenHUD", "FSize" + i, 9)
                 });
             }
         }
@@ -93,14 +84,12 @@ namespace PokerCaption.Engine
             _win.Boxes.Clear();
             foreach (var it in Items)
             {
-                if (!it.Visible || !HudTags.Visible(it.Format, ctx)) continue;
                 _win.Boxes.Add(new GenHudWindow.Box
                 {
                     Text = HudTags.Resolve(it.Format, ctx),
                     Fore = it.Color == Color.Empty ? Color.White : it.Color,
-                    Back = it.InvisibleBack ? Color.Empty : it.Back,
+                    Back = it.Back,
                     FontSizePt = it.Size,
-                    Align = it.Align,
                     // Mostra in grassetto i valori prodotti dai tag.
                     Bold = (it.Format ?? "").IndexOf('[', StringComparison.Ordinal) >= 0
                 });
@@ -135,20 +124,19 @@ namespace PokerCaption.Engine
 
     /// <summary>
     /// Disegna tutti i pannelli General HUD in una finestra con larghezza fissa.
-    /// L'altezza di ciascuno dipende dal font e dal padding verticale.
+    /// L'altezza di ciascuno dipende dal font e da un margine fisso per la leggibilità.
     /// </summary>
     public sealed class GenHudWindow : OverlayWindow
     {
         public const int CanvasWidth = 101;
-        private const int PadV = 4; // padding verticale dentro ogni box
+        private const int TextMargin = 4;
 
         public sealed class Box
         {
             public string Text = "";
             public Color Fore = Color.White;
-            public Color Back = Color.Empty;   // Empty = trasparente (FInvisibleBack)
+            public Color Back;
             public int FontSizePt = 9;
-            public int Align = 1;
             public bool Bold;
         }
 
@@ -206,7 +194,7 @@ namespace PokerCaption.Engine
         private static int BoxHeight(Box b)
         {
             using var f = FontOf(b);
-            return (int)Math.Ceiling(f.GetHeight()) + 2 * PadV;
+            return (int)Math.Ceiling(f.GetHeight()) + 2 * TextMargin;
         }
 
         /// <summary>Ricalcola l'altezza della canvas e ridipinge (ogni tick).</summary>
@@ -224,22 +212,13 @@ namespace PokerCaption.Engine
             foreach (var b in Boxes)
             {
                 int h = BoxHeight(b);
-                if (b.Back != Color.Empty)
-                {
-                    using var br = new SolidBrush(b.Back);
-                    e.Graphics.FillRectangle(br, 0, y, CanvasWidth, h);
-                }
+                using var br = new SolidBrush(b.Back);
+                e.Graphics.FillRectangle(br, 0, y, CanvasWidth, h);
                 if (!string.IsNullOrEmpty(b.Text))
                 {
                     using var f = FontOf(b);
                     var rect = new Rectangle(0, y, CanvasWidth, h);
-                    var flags = TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine;
-                    switch (Math.Max(0, Math.Min(2, b.Align)))
-                    {
-                        case 0: rect.X = 3; rect.Width -= 3; break;                        // sinistra
-                        case 2: flags |= TextFormatFlags.Right; rect.Width -= 3; break;    // destra
-                        default: flags |= TextFormatFlags.HorizontalCenter; break;         // centro
-                    }
+                    var flags = TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter | TextFormatFlags.SingleLine;
                     TextRenderer.DrawText(e.Graphics, b.Text, f, rect, b.Fore, flags);
                 }
                 y += h;
