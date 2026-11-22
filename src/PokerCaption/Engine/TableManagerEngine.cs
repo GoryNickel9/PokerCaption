@@ -8,7 +8,6 @@ public sealed class TableManagerEngine
 {
     private readonly Action<string> _log;
     private readonly Func<IntPtr, Rectangle, bool> _place;
-    private readonly Dictionary<int, Rectangle> _geometryPreview = new();
     private readonly Dictionary<TableInfo, Placement> _placements = new();
     private const int MoveRetryMs = 1000;
     private const int SettleMs = 150;
@@ -42,13 +41,6 @@ public sealed class TableManagerEngine
         _place = place;
     }
 
-    internal void PreviewGeometry(int slot, TableManagerConfig.Slot geometry) =>
-        _geometryPreview[slot] = new Rectangle(geometry.Left, geometry.Top, geometry.Width, geometry.EffectiveHeight);
-
-    internal void ClearGeometryPreview() => _geometryPreview.Clear();
-
-    internal void ClearGeometryPreview(int slot) => _geometryPreview.Remove(slot);
-
     internal bool IsMoving(TableInfo table) => Enabled && _placements.TryGetValue(table, out var state) &&
         (state.DragOrigin.HasValue || (state.Bounds.HasValue && state.SettledBounds == null &&
             Environment.TickCount64 < state.NextMove));
@@ -59,7 +51,6 @@ public sealed class TableManagerEngine
         ConfigName = ini.Get("PokerCaption", "TableManagerConfig", "4x");
         _enabled = ini.GetBool("PokerCaption", "TableManagerOn", false);
         Config = null;
-        ClearGeometryPreview();
         foreach (var table in _placements.Keys) ClearSlot(table);
         _placements.Clear();
         try
@@ -69,6 +60,17 @@ public sealed class TableManagerEngine
         }
         catch (Exception ex) { _log("TM config ERR: " + ex.Message); }
         if (wasLayoutOnly != LayoutOnly) LayoutModeChanged?.Invoke();
+    }
+
+    internal void UpdateSavedLayout(TableManagerConfig config, IReadOnlyList<int> homeSlots)
+    {
+        Config = config;
+        foreach (var (table, state) in _placements)
+        {
+            if (state.Home < 0) continue;
+            state.Home = homeSlots[state.Home];
+            if (state.Active < 0) table.PlacedSlot = state.Home;
+        }
     }
 
     public void OnTick(IReadOnlyList<TableInfo> tables) => OnTick(tables, Environment.TickCount64);
@@ -163,7 +165,6 @@ public sealed class TableManagerEngine
 
     private Rectangle SlotBounds(bool active, int index)
     {
-        if (!active && _geometryPreview.TryGetValue(index, out var preview)) return preview;
         var slot = (active ? Config.ActiveSlots : Config.InactiveSlots)[index];
         return new Rectangle(slot.Left, slot.Top, slot.Width, slot.EffectiveHeight);
     }

@@ -61,14 +61,13 @@ namespace PokerCaption
             public Regex IndexedKeys;     // chiavi <prefisso><i> della famiglia (gruppo 1=prefisso, 2=indice)
             public bool UseCount;         // [GenHUD] usa Count=N
             public string ListName;       // ListBox
-            public string BtnAdd, BtnDelete, BtnClone, BtnUp, BtnDown;
+            public string BtnAdd, BtnDelete, BtnUp, BtnDown;
             // pannello proprietà
             public string EdFormat, ChkVisible, BtnAddTag, BtnFontColor;
             public string ColorKey;                        // chiave scritta da BtnFontColor
             public long ColorKeyDefault = 0xFFFFFF;        // default se la chiave manca
-            // General HUD only
-            public string BtnBkColor, BtnFont;
-            public string BkColorKey = "FBkColor";
+            public string BtnBkColor, BtnFont, BkColorKey, FontSizeKey;
+            public int DefaultFontSize = 10;
             public Action ReloadEngine;   // risincronizza il motore dopo la scrittura
         }
 
@@ -77,7 +76,7 @@ namespace PokerCaption
         // Le chiavi delle condizioni "Show panel" (SOn*/SFor*/S_Caption) sono state
         // rimosse con il gruppo: i pannelli sono sempre visibili su qualsiasi variante.
         private static readonly Regex RxTablePanelKey = new Regex(
-            "^(FormatStr|FVisible|FontColor)(\\d+)$",
+            "^(FormatStr|FVisible|FontColor|FontSize|BackColor)(\\d+)$",
             RegexOptions.IgnoreCase);
         // [HUD] pannelli giocatore: tutte le chiavi pl*<i>
         private static readonly Regex RxPlayerPanelKey = new Regex("^(pl(?:[A-Za-z_]+|Drag[XY]\\d+_))(\\d+)$", RegexOptions.IgnoreCase);
@@ -95,31 +94,32 @@ namespace PokerCaption
                     {
                         Title = "Table panels", Section = "HUD", Primary = "FormatStr", VisibleKey = "FVisible",
                         IndexedKeys = RxTablePanelKey, UseCount = false, ListName = "tablePanelsList",
-                        BtnAdd = "tablePanelsAdd", BtnDelete = "tablePanelsDelete", BtnClone = "tablePanelsClone",
-                        BtnUp = "tablePanelsMoveUp", BtnDown = "tablePanelsMoveDown",
+                        BtnAdd = "tablePanelsAdd", BtnDelete = "tablePanelsDelete",
                         EdFormat = "tablePanelsFormatStr", ChkVisible = "tablePanelsVisible", BtnAddTag = "tablePanelsAddTag",
                         BtnFontColor = "tablePanelsFontColor", ColorKey = "FontColor", ColorKeyDefault = 0xFFFFFF,
+                        BtnBkColor = "tablePanelsBackColor", BtnFont = "tablePanelsFont", BkColorKey = "BackColor", FontSizeKey = "FontSize",
                         ReloadEngine = () => Program.Service?.Hud?.Load(Program.Ini)
                     },
                     new PanelKind
                     {
                         Title = "Player panels", Section = "HUD", Primary = "plFormatStr", VisibleKey = "plFVisible",
                         IndexedKeys = RxPlayerPanelKey, UseCount = false, ListName = "playerPanelsList",
-                        BtnAdd = "playerPanelsAdd", BtnDelete = "playerPanelsDelete", BtnClone = "playerPanelsClone",
-                        BtnUp = "playerPanelsMoveUp", BtnDown = "playerPanelsMoveDown",
+                        BtnAdd = "playerPanelsAdd", BtnDelete = "playerPanelsDelete",
                         EdFormat = "playerPanelsFormatStr", ChkVisible = "playerPanelsVisible", BtnAddTag = "playerPanelsAddTag",
                         BtnFontColor = "playerPanelsFontColor", ColorKey = "plFontColor", ColorKeyDefault = 0xFFFFFF,
+                        BtnBkColor = "playerPanelsBackColor", BtnFont = "playerPanelsFont", BkColorKey = "plBackColor", FontSizeKey = "plFontSize",
                         ReloadEngine = () => Program.Service?.Hud?.Load(Program.Ini)
                     },
                     new PanelKind
                     {
                         Title = "General HUD", Section = "GenHUD", Primary = "formatStr",
                         IndexedKeys = RxGenHudKey, UseCount = true, ListName = "generalHudPanelsList",
-                        BtnAdd = "generalHudAdd", BtnDelete = "generalHudDelete", BtnClone = null,
+                        BtnAdd = "generalHudAdd", BtnDelete = "generalHudDelete",
                         BtnUp = "generalHudMoveUp", BtnDown = "generalHudMoveDown",
                         EdFormat = "generalHudFormatStr", BtnAddTag = "generalHudAddTag",
                         BtnFontColor = "generalHudFontColor", ColorKey = "FColor", ColorKeyDefault = 0xFFFFFF,
                         BtnBkColor = "generalHudBackColor", BtnFont = "generalHudFont",
+                        BkColorKey = "FBkColor", FontSizeKey = "FSize", DefaultFontSize = 9,
                         ReloadEngine = () => Program.Service?.GenHud?.Load(Program.Ini)
                     }
                 };
@@ -131,10 +131,11 @@ namespace PokerCaption
                     // CRUD
                     WireBtn(f, k.BtnAdd, () => PanelAdd(f, k1), "'Add new panel'");
                     WireBtn(f, k.BtnDelete, () => PanelDelete(f, k1), "'Delete panel'");
-                    if (k.BtnClone != null)
-                        WireBtn(f, k.BtnClone, () => PanelClone(f, k1), "'Clone panel'");
-                    WireBtn(f, k.BtnUp, () => PanelMove(f, k1, -1), "su");
-                    WireBtn(f, k.BtnDown, () => PanelMove(f, k1, +1), "giù");
+                    if (k.UseCount)
+                    {
+                        WireBtn(f, k.BtnUp, () => MoveGeneralHudPanel(f, k1, -1), "su");
+                        WireBtn(f, k.BtnDown, () => MoveGeneralHudPanel(f, k1, +1), "giù");
+                    }
 
                     // selezione nella lista → pannello proprietà
                     var list = PanelListBox(f, k);
@@ -152,7 +153,6 @@ namespace PokerCaption
                         WireBtn(f, k.BtnAddTag, () => InsertTag(f, k1), "'Add tag'");
 
 
-                    // extra General HUD
                     if (k.BtnBkColor != null) WireColor(f, k1, k.BtnBkColor, k.BkColorKey, 0x404040);
                     if (Ctl(f, k.BtnFont) is Button btnFont)
                         btnFont.Click += (s, e) => PickPanelFont(f, k1);
@@ -237,12 +237,11 @@ namespace PokerCaption
 
         // ---------- persistenza dal pannello proprietà ----------
         private static void SetPanelKey(PanelKind k, string key, string value) =>
-            Program.Ini.GetOrAddSection(k.Section)[key] = value;
+            Program.Ini.SaveChanges(k.Section, section => section[key] = value);
 
         /// <summary>Salva l'INI, ricarica il motore e (per la format string) aggiorna la riga della lista.</summary>
-        private void PersistPanelField(Form f, PanelKind k, int i, bool updateRow)
+        private void RefreshPanelField(Form f, PanelKind k, int i, bool updateRow)
         {
-            Program.Ini.Save();
             try { k.ReloadEngine(); }
             catch (Exception ex) { Log("HUD panels reload ERR: " + ex.Message); }
             if (updateRow)
@@ -265,7 +264,7 @@ namespace PokerCaption
                 int i = SelectedIndex(f, k);
                 if (i < 0) return;
                 SetPanelKey(k, k.Primary + i, ed.Text);
-                PersistPanelField(f, k, i, updateRow: true);
+                RefreshPanelField(f, k, i, updateRow: true);
             }
             catch (Exception ex) { Log("HUD panels format ERR: " + ex.Message); }
         }
@@ -278,7 +277,7 @@ namespace PokerCaption
                 int i = SelectedIndex(f, k);
                 if (i < 0) return;
                 SetPanelKey(k, k.VisibleKey + i, chk.Checked ? "1" : "0");
-                PersistPanelField(f, k, i, updateRow: false);
+                RefreshPanelField(f, k, i, updateRow: false);
                 Log("HUD panels " + k.Title + ": visible #" + (i + 1) + " = " + chk.Checked);
             }
             catch (Exception ex) { Log("HUD panels visible ERR: " + ex.Message); }
@@ -300,7 +299,7 @@ namespace PokerCaption
                         using var dlg = new ColorDialog { FullOpen = true, Color = cur == Color.Empty ? Color.White : cur };
                         if (dlg.ShowDialog(Form) != DialogResult.OK) return;
                         SetPanelKey(k, key + i, ColorToBgr(dlg.Color).ToString(CultureInfo.InvariantCulture));
-                        PersistPanelField(f, k, i, updateRow: false);
+                        RefreshPanelField(f, k, i, updateRow: false);
                         Log("HUD panels " + k.Title + ": " + key + " #" + (i + 1) + " = " + dlg.Color.Name);
                     }
                     catch (Exception ex) { Log("HUD panels color ERR: " + ex.Message); }
@@ -310,7 +309,7 @@ namespace PokerCaption
 
         private static int ColorToBgr(Color c) => c.R | (c.G << 8) | (c.B << 16);
 
-        /// <summary>'Font' del General HUD: il motore onora solo la dimensione (FSize_i).</summary>
+        /// <summary>Il rendering dei tre HUD usa la dimensione scelta e il font Tahoma.</summary>
         private void PickPanelFont(Form f, PanelKind k)
         {
             try
@@ -318,19 +317,12 @@ namespace PokerCaption
                 if (_panelsSync) return;
                 int i = SelectedIndex(f, k);
                 if (i < 0) return;
-                bool tablePanel = k.Primary == "FormatStr";
-                var sizeKey = tablePanel ? "FontSize" : "FSize";
-                using var dlg = new FontDialog { Font = new Font(Program.Ini.Get(k.Section, "FontName" + i) ?? "Tahoma",
-                    Math.Max(1, Program.Ini.GetInt(k.Section, sizeKey + i, 9)),
-                    tablePanel && Program.Ini.GetBool(k.Section, "FontBold" + i, true) ? FontStyle.Bold : FontStyle.Regular) };
+                using var current = new Font("Tahoma",
+                    Math.Max(1, Program.Ini.GetInt(k.Section, k.FontSizeKey + i, k.DefaultFontSize)));
+                using var dlg = new FontDialog { Font = current };
                 if (dlg.ShowDialog(Form) != DialogResult.OK) return;
-                SetPanelKey(k, sizeKey + i, ((int)Math.Round(dlg.Font.Size)).ToString(CultureInfo.InvariantCulture));
-                if (tablePanel)
-                {
-                    SetPanelKey(k, "FontName" + i, dlg.Font.Name);
-                    SetPanelKey(k, "FontBold" + i, dlg.Font.Bold ? "1" : "0");
-                }
-                PersistPanelField(f, k, i, updateRow: false);
+                SetPanelKey(k, k.FontSizeKey + i, ((int)Math.Round(dlg.Font.Size)).ToString(CultureInfo.InvariantCulture));
+                RefreshPanelField(f, k, i, updateRow: false);
                 Log("HUD panels " + k.Title + ": font size #" + (i + 1) + " = " + (int)Math.Round(dlg.Font.Size));
             }
             catch (Exception ex) { Log("HUD panels font ERR: " + ex.Message); }
@@ -362,7 +354,7 @@ namespace PokerCaption
                 }
                 finally { _panelsSync = false; }
                 SetPanelKey(k, k.Primary + i, ed.Text);
-                PersistPanelField(f, k, i, updateRow: true);
+                RefreshPanelField(f, k, i, updateRow: true);
                 Log("HUD panels " + k.Title + ": aggiunto tag " + tag + " al pannello #" + (i + 1));
             }
             catch (Exception ex) { Log("HUD panels addtag ERR: " + ex.Message); }
@@ -400,10 +392,12 @@ namespace PokerCaption
             try
             {
                 if (Program.Ini == null) return;
-                var sec = Program.Ini.GetOrAddSection(k.Section);
                 int n = PanelCount(k);
-                WritePanelDefaults(k, sec, n);
-                if (k.UseCount) sec["Count"] = (n + 1).ToString(CultureInfo.InvariantCulture);
+                Program.Ini.SaveChanges(k.Section, section =>
+                {
+                    WritePanelDefaults(k, section, n);
+                    if (k.UseCount) section["Count"] = (n + 1).ToString(CultureInfo.InvariantCulture);
+                });
                 CommitPanelChange(f, k, "aggiunto pannello #" + (n + 1), n);
             }
             catch (Exception ex) { Log("HUD panels add ERR: " + ex.Message); }
@@ -419,42 +413,20 @@ namespace PokerCaption
                 int i = lb.SelectedIndex;
                 int n = PanelCount(k);
                 if (i < 0 || i >= n) { Log("HUD panels: " + k.Title + " delete senza pannello selezionato"); return; }
-                var sec = Program.Ini.GetOrAddSection(k.Section);
-                RemovePanelIndex(sec, k.IndexedKeys, i);
-                ReindexPanelKeys(sec, k.IndexedKeys, i);
-                if (k.UseCount) sec["Count"] = (n - 1).ToString(CultureInfo.InvariantCulture);
+                Program.Ini.SaveChanges(k.Section, section =>
+                {
+                    RemovePanelIndex(section, k.IndexedKeys, i);
+                    ReindexPanelKeys(section, k.IndexedKeys, i);
+                    if (k.UseCount) section["Count"] = (n - 1).ToString(CultureInfo.InvariantCulture);
+                });
                 CommitPanelChange(f, k, "eliminato pannello #" + (i + 1) + " ('" + PanelDisplayText(lb.Items[i] as string) + "')",
                     Math.Min(i, Math.Max(0, n - 2)));
             }
             catch (Exception ex) { Log("HUD panels delete ERR: " + ex.Message); }
         }
 
-        private void PanelClone(Form f, PanelKind k)
-        {
-            try
-            {
-                if (Program.Ini == null) return;
-                var lb = PanelListBox(f, k);
-                if (lb == null) return;
-                int i = lb.SelectedIndex;
-                int n = PanelCount(k);
-                if (i < 0 || i >= n) { Log("HUD panels: " + k.Title + " clone senza pannello selezionato"); return; }
-                var sec = Program.Ini.GetOrAddSection(k.Section);
-                // copia tutte le chiavi <prefisso><i> sulla nuova coda <prefisso><n>
-                foreach (var e in sec.Entries.ToList())
-                {
-                    var m = k.IndexedKeys.Match(e.Key);
-                    if (m.Success && int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture) == i)
-                        sec.Entries.Add(new KeyValuePair<string, string>(m.Groups[1].Value + n, e.Value));
-                }
-                if (k.UseCount) sec["Count"] = (n + 1).ToString(CultureInfo.InvariantCulture);
-                CommitPanelChange(f, k, "clonato pannello #" + (i + 1) + " -> #" + (n + 1), n);
-            }
-            catch (Exception ex) { Log("HUD panels clone ERR: " + ex.Message); }
-        }
-
         /// <summary>Su/giù: scambia l'item selezionato col vicino (swap di tutte le chiavi indicizzate).</summary>
-        private void PanelMove(Form f, PanelKind k, int delta)
+        private void MoveGeneralHudPanel(Form f, PanelKind k, int delta)
         {
             try
             {
@@ -462,8 +434,7 @@ namespace PokerCaption
                 int i = SelectedIndex(f, k), j = i + delta;
                 int n = PanelCount(k);
                 if (i < 0 || i >= n || j < 0 || j >= n) return;
-                var sec = Program.Ini.GetOrAddSection(k.Section);
-                SwapPanelIndex(sec, k.IndexedKeys, i, j);
+                Program.Ini.SaveChanges(k.Section, section => SwapPanelIndex(section, k.IndexedKeys, i, j));
                 CommitPanelChange(f, k, "spostato pannello #" + (i + 1) + (delta < 0 ? " su" : " giù"), j);
             }
             catch (Exception ex) { Log("HUD panels move ERR: " + ex.Message); }
@@ -495,7 +466,6 @@ namespace PokerCaption
         /// <summary>Salva l'INI, ricarica il motore e riallinea la lista alla selezione.</summary>
         private void CommitPanelChange(Form f, PanelKind k, string what, int select)
         {
-            Program.Ini.Save();
             try { k.ReloadEngine(); }
             catch (Exception ex) { Log("HUD panels reload ERR: " + ex.Message); }
             FillPanelList(f, k);

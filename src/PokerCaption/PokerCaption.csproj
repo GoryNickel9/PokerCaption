@@ -16,7 +16,7 @@
     <ApplicationIcon>$(MSBuildProjectDirectory)\obj\PokerCaption.ico</ApplicationIcon>
     <RootNamespace>PokerCaption</RootNamespace>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
-    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <SatelliteResourceLanguages>en;it</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(PokerCaptionMockup)' == 'true'">

@@ -28,45 +28,25 @@ namespace PokerCaption
         private bool _pingOk;
         public void Build(bool connectToClient = true)
         {
+            var ini = Program.Ini;
+            UiLanguage.Use(ini.Get("PokerCaption", "Language", "en"));
             var f = DesktopWindow.Create();
             Form = f;
-            var ini = Program.Ini;
             _sessionStatus = (Label)Ctl(f, "sessionStatus");
 
             var map = UiBinding.Settings;
             int applied = UiBinding.Apply(f, ini, map);
             Log($"UI: {applied} settings loaded");
 
-            // switch principali LIVE: il cambio ha effetto immediato sul motore
-            void WireLive(string ctl, Action onChange)
+            foreach (var entry in map)
             {
-                var c = DesktopWindow.Descendants(f).FirstOrDefault(x => x.Name == ctl) as CheckBox;
-                if (c != null) c.CheckedChanged += (s, e) => onChange();
+                if (Ctl(f, entry.Control) is not CheckBox box) continue;
+                WireSavedToggle(box, entry.Section, entry.Key, () =>
+                {
+                    if (entry.Key is "active" or "LockGeneral") Program.Service?.GenHud.Load(ini);
+                    else Program.Service?.Hud.Load(ini);
+                });
             }
-            WireLive("hudActive", () =>           // HUD tab 'Active' → [HUD] HudActive
-            {
-                Program.Ini.Set("HUD", "HudActive", UiBinding.IsActive(f, "hudActive") ? "1" : "0");
-                Program.Service.Hud.Load(Program.Ini);
-                Log("HUD active = " + UiBinding.IsActive(f, "hudActive"));
-            });
-            WireLive("generalHudActive", () =>      // General HUD 'Active' → [GenHUD] active
-            {
-                Program.Ini.Set("GenHUD", "active", UiBinding.IsActive(f, "generalHudActive") ? "1" : "0");
-                Program.Service.GenHud.Load(Program.Ini);
-                Log("GenHUD active = " + UiBinding.IsActive(f, "generalHudActive"));
-            });
-            WireLive("lockGeneral", () =>           // 'Lock General' → [HUD] LockGeneral: blocca il mouse sul General HUD
-            {
-                Program.Ini.Set("HUD", "LockGeneral", UiBinding.IsActive(f, "lockGeneral") ? "1" : "0");
-                Program.Service.GenHud.Load(Program.Ini);   // rilegge LockGeneral per il drag
-                Log("HUD lock general = " + UiBinding.IsActive(f, "lockGeneral"));
-            });
-            WireLive("lockHud", () =>               // 'Lock HUD' → [HUD] LockHUD: blocca i pannelli tavolo/giocatore
-            {
-                Program.Ini.Set("HUD", "LockHUD", UiBinding.IsActive(f, "lockHud") ? "1" : "0");
-                Program.Service.Hud.Load(Program.Ini);      // al cambio ricrea i pannelli col giusto click-through
-                Log("HUD lock = " + UiBinding.IsActive(f, "lockHud"));
-            });
             // tab HUD: gruppo 'HUD panels' (Table/Player panels + General HUD):
             // liste dai pannelli INI + pulsanti Add new/Delete/Clone (MainUi.HudPanels.cs)
             WireHudPanels(f);
@@ -75,21 +55,8 @@ namespace PokerCaption
             // che può chiudere il form a metà Build (il wiring su form chiuso è rumore)
             AttachBetscript(f);
             WireTabs(f);
-
-            var pages = DesktopWindow.GetWorkspace(f);
-            string pageName = ini.Get("PokerCaption", "ActivePage", "HUD");
-            var selected = pages.Controls.Cast<Control>().FirstOrDefault(page =>
-                string.Equals(page.Name, pageName, StringComparison.OrdinalIgnoreCase));
-            if (selected != null) pages.SelectPage(selected);
-            pages.PageChanged += (_, _) => ini.Set("PokerCaption", "ActivePage", pages.SelectedPage.Name);
-
-            // Save options salva PokerCaption.ini e conserva il backup .ini_bak.
-            if (Ctl(f, "saveOptions") is Button btnSaveOpts)
-                btnSaveOpts.Click += (s, e) =>
-                {
-                    try { SaveBoundOptions(f); Log("Save options: PokerCaption.ini salvato su disco"); }
-                    catch (Exception ex) { Log("Save options ERR: " + ex.Message); }
-                };
+            WireLanguage(f);
+            RefreshLanguage(f);
 
             // '[actions] tag config' → dialog chiavi actTag* (Engine/ActionsTagConfigForm)
             if (Ctl(f, "actionsTagConfig") is Button btnActCfg)
@@ -101,7 +68,7 @@ namespace PokerCaption
 
             if (!connectToClient)
             {
-                _sessionStatus.Text = "Offline preview";
+                _sessionStatus.Text = UiLanguage.Text("Offline preview");
                 return;
             }
 
@@ -306,13 +273,55 @@ namespace PokerCaption
                 Visible = Program.Ini.GetBool("PokerCaption", "MinimizeToTray", true),
             };
             var menu = new ContextMenuStrip();
-            menu.Items.Add("Mostra", null, (s, e) => ShowFromTray());
-            menu.Items.Add("Config INI…", null, (s, e) => new SettingsForm(Path.Combine(Program.AppDir, "PokerCaption.ini")).ShowDialog(Form));
-            menu.Items.Add("Esci", null, (s, e) => Form.Close());
+            menu.Items.Add(UiLanguage.Text("Show"), null, (s, e) => ShowFromTray());
+            menu.Items.Add("Config INI…", null, (_, _) =>
+            {
+                using var settings = new SettingsForm(Path.Combine(Program.AppDir, "PokerCaption.ini"),
+                    Program.Ini, ApplyAdvancedSettings);
+                settings.ShowDialog(Form);
+            });
+            menu.Items.Add(UiLanguage.Text("Exit"), null, (s, e) => Form.Close());
+            menu.Opening += (_, _) =>
+            {
+                menu.Items[0].Text = UiLanguage.Text("Show");
+                menu.Items[2].Text = UiLanguage.Text("Exit");
+            };
             _tray.ContextMenuStrip = menu;
             _tray.DoubleClick += (s, e) => ShowFromTray();
             Form.HandleCreated += (_, _) => ApplyTrayOption(Program.Ini.GetBool("PokerCaption", "MinimizeToTray", true));
             if (Form.IsHandleCreated) ApplyTrayOption(_tray.Visible);
+        }
+
+        private void ApplyAdvancedSettings(string section)
+        {
+            var ini = Program.Ini;
+            var service = Program.Service;
+            if (section.Equals("AdvancedBets", StringComparison.OrdinalIgnoreCase))
+            {
+                service?.Betscript.Load(ini);
+                RefreshBetList(Form, LoadBetscriptRules());
+            }
+            else if (section.Equals("AutoDialog", StringComparison.OrdinalIgnoreCase))
+            {
+                SyncDialogsFromIni();
+                service?.AutoDialog.Load(ini);
+            }
+            else if (section.Equals("HUD", StringComparison.OrdinalIgnoreCase) ||
+                     section.Equals("GenHUD", StringComparison.OrdinalIgnoreCase))
+            {
+                service?.Hud.Load(ini);
+                service?.GenHud.Load(ini);
+                _tabsSync = true;
+                try { UiBinding.Apply(Form, ini, UiBinding.Settings); }
+                finally { _tabsSync = false; }
+            }
+            else if (section.Equals("PokerCaption", StringComparison.OrdinalIgnoreCase) ||
+                     section.Equals("Sisal", StringComparison.OrdinalIgnoreCase))
+            {
+                SyncOptionsFromIni(WorkspacePageByName(Form, "Options"));
+                service?.Load(ini);
+                ApplyTrayOption(ini.GetBool("PokerCaption", "MinimizeToTray", true));
+            }
         }
 
         private void ApplyTrayOption(bool enabled)
@@ -341,22 +350,30 @@ namespace PokerCaption
             if (_tray != null) _tray.Visible = true;
         }
 
-        private static void SaveBoundOptions(Form form)
+        private void WireSavedToggle(CheckBox box, string section, string key, Action onSaved)
         {
-            var map = UiBinding.Settings;
-            if (form != null) UiBinding.Collect(form, Program.Ini, map);
-            Program.Ini?.Save();
+            bool restoring = false;
+            box.CheckedChanged += (_, _) =>
+            {
+                if (_tabsSync || restoring) return;
+                bool requested = box.Checked;
+                try { Program.Ini.SaveChanges(section, values => values[key] = requested ? "1" : "0"); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    restoring = true;
+                    try { box.Checked = !requested; }
+                    finally { restoring = false; }
+                    Log($"Save {key}: {ex.Message}");
+                    MessageBox.Show(Form, ex.Message, "PokerCaption", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+                onSaved();
+            };
         }
 
         // ---------- ciclo di vita ----------
         private void OnFormClosing(object sender, FormClosingEventArgs e)
         {
-            if (e.CloseReason == CloseReason.UserClosing && _tableManagerPanel?.ConfirmDiscard() == false)
-            {
-                e.Cancel = true;
-                return;
-            }
-            SaveBoundOptions(Form);
             try { SessionStats.Current.Save(Path.Combine(Program.AppDir, "global_stats")); } catch { }
             StopEngine();
             _tray?.Dispose();

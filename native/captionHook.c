@@ -49,6 +49,7 @@ typedef void *(__thiscall *cc_getName_t)(void *);
 typedef void *(__thiscall *cc_getStringLabel_t)(void *);
 typedef void *(__thiscall *cc_getStringText_t)(void *);
 typedef void *(__thiscall *cc_getWorldPos_t)(void *, void *ret);
+typedef void *(__thiscall *cc_toWorld_t)(void *, void *ret, const void *local);
 typedef void *(__thiscall *cc_getContentSize_t)(void *);
 typedef unsigned char (__thiscall *cc_isVisible_t)(void *);
 typedef void *(*cc_getInstance_t)(void);                     /* static: call normale */
@@ -63,6 +64,7 @@ static cc_getStringLabel_t  p_getStringLabel;
 static cc_getStringLabel_t  p_getStringProxy;
 static cc_getStringText_t   p_getStringText;
 static cc_getWorldPos_t     p_getWorldPos;
+static cc_toWorld_t         p_toWorld;
 static cc_getContentSize_t  p_getContentSize;
 static cc_isVisible_t       p_isVisible;
 static cc_getInstance_t     p_getInstance;
@@ -121,6 +123,7 @@ static void cocos_bind(void)
     p_getStringProxy  = (cc_getStringLabel_t)GetProcAddress(h, "?getString@LabelProxy@cocos2d@@QBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
     p_getStringText   = (cc_getStringText_t)GetProcAddress(h, "?getString@Text@ui@cocos2d@@QBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
     p_getWorldPos     = (cc_getWorldPos_t)GetProcAddress(h, "?getWorldPosition@Widget@ui@cocos2d@@QBE?AVVec2@3@XZ");
+    p_toWorld        = (cc_toWorld_t)GetProcAddress(h, "?convertToWorldSpace@Node@cocos2d@@QBE?AVVec2@2@ABV32@@Z");
     p_getContentSize  = (cc_getContentSize_t)GetProcAddress(h, "?getContentSize@Node@cocos2d@@UBEABVSize@2@XZ");
     p_isVisible       = (cc_isVisible_t)GetProcAddress(h, "?isVisible@Node@cocos2d@@UBE_NXZ");
     g_can_find_view = sizeof(void *) == 4 && p_getGLView && p_getNumGLViews && p_getWin32Window;
@@ -172,13 +175,16 @@ static int cc_str_read(const void *s, wchar_t *out, int max)
 #define ACTION_HOOKS_STATUS  0x2658u
 #define BETSCRIPT_HERO_SEAT  0x265Cu
 #define BETSCRIPT_AMOUNT     0x2660u
+#define BACK_POSITION        0x2664u
+#define BACK_DETECTION       0x19D5u
+#define SITOUT_INTENT        0x19D6u
 enum ActionHookMode {
     ACTION_HOOKS_DEFAULT, ACTION_SKIP_VISIBLE, ACTION_SKIP_ALL,
     ACTION_PROXY_ONLY = 4, ACTION_WIDGET_ONLY
 };
 _Static_assert(ACTION_TICKS + ACTION_CAPACITY * sizeof(DWORD) == ACTION_TICKS_VERSION,
                "action ticks must fit before the layout version");
-_Static_assert(BETSCRIPT_AMOUNT + sizeof(DWORD) <= 0x2668u,
+_Static_assert(BACK_POSITION + sizeof(DWORD) <= 0x2668u,
                "action timing must fit before the seat array");
 #define OPTION_TRACE_ENABLE  0x19D4u
 #define OPTION_TRACE_RESULT  0x19E0u
@@ -195,7 +201,9 @@ struct TextCtx {
     HWND table;
     int count, clientW, clientH, nodes, boardCards;
     void *board, *seats[11];
-    unsigned optionTrace;
+    unsigned optionTrace, backPosition;
+    int detectBack, backVisible;
+    BYTE preplayLabel[5], preplayMarks[5];
     const wchar_t *heroNick;
     int heroSeat, canSetAmount;
     float scaleX, scaleY;
@@ -346,7 +354,32 @@ static int read_label(void *node, wchar_t *text, int *isWidget)
     return 0;
 }
 
-static void walk_node(void *node, int depth, struct TextCtx *ctx, int seat, enum TextRole role, unsigned optionNode)
+static unsigned read_back_position(struct TextCtx *ctx, void *label)
+{
+    if (!p_toWorld || !p_getContentSize || ctx->scaleX <= 0 || ctx->scaleY <= 0) return 0;
+    const float *size = p_getContentSize(label);
+    if (IsBadReadPtr(size, sizeof(float) * 2) ||
+        !(size[0] > 0 && size[0] < 2000 && size[1] > 0 && size[1] < 500)) return 0;
+    struct Vec2T local = { size[0] * 0.5f, size[1] * 0.5f }, world;
+    p_toWorld(label, &world, &local);
+    float x = world.x * ctx->scaleX, y = ctx->clientH - world.y * ctx->scaleY;
+    if (!(x > ctx->clientW * 0.5f && x < ctx->clientW && x < 65536 &&
+        y > ctx->clientH * 0.7f && y < ctx->clientH && y < 65536)) return 0;
+    return (unsigned)x | ((unsigned)y << 16);
+}
+
+static BYTE sitout_intent(const struct TextCtx *ctx)
+{
+    BYTE result = 0;
+    for (int i = 0; i < 5; i++) {
+        BYTE marks = ctx->preplayMarks[i];
+        if (ctx->preplayLabel[i] == 1) result |= marks & 3;
+        else if (ctx->preplayLabel[i] == 2) result |= (marks & 3) << 2;
+    }
+    return result;
+}
+
+static void walk_node(void *node, int depth, struct TextCtx *ctx, int seat, enum TextRole role, unsigned optionNode, int preplay)
 {
     if (!node || depth > 24 || (!ctx->optionTrace && ctx->nodes >= 4096)) return;
     if (ctx->optionTrace && ctx->nodes >= OPTION_TRACE_MAX_NODES) {
@@ -377,6 +410,31 @@ static void walk_node(void *node, int depth, struct TextCtx *ctx, int seat, enum
         void *nr = p_getName(node);
         if (!IsBadReadPtr(nr, 0x18)) cc_str_read(nr, nameW, 48);
     }
+    if (ctx->detectBack || ctx->optionTrace) {
+        if (wcsncmp(nameW, L"checkbox", 8) == 0 && nameW[8] >= L'1' &&
+            nameW[8] <= L'5' && !nameW[9]) preplay = nameW[8] - L'1';
+        if (preplay >= 0) {
+            if (wcscmp(nameW, L"checkbox") == 0) ctx->preplayMarks[preplay] |= 1;
+            if (wcscmp(nameW, L"checkbox_check") == 0) ctx->preplayMarks[preplay] |= 2;
+            if (wcscmp(nameW, L"label") == 0) {
+                wchar_t choice[TEXT_MAXCHARS + 1] = {0};
+                int widget = 0;
+                if (read_label(node, choice, &widget)) {
+                    if (_wcsicmp(choice, L"Sit out next hand") == 0) ctx->preplayLabel[preplay] = 1;
+                    if (_wcsicmp(choice, L"Sit out next big blind") == 0) ctx->preplayLabel[preplay] = 2;
+                }
+            }
+        }
+    }
+    if (ctx->optionTrace && preplay >= 0 && ctx->count < TEXT_MAX && nameW[0]) {
+        const char *type = cocos_type_name(node);
+        wchar_t wideType[TEXT_MAXCHARS + 1] = {0};
+        if (type && !IsBadReadPtr(type, TEXT_MAXCHARS))
+            MultiByteToWideChar(CP_ACP, 0, type, (int)strnlen(type, TEXT_MAXCHARS), wideType, TEXT_MAXCHARS);
+        texts_add(ctx, preplay, depth, 0, 0, wideType, nameW, 0);
+    }
+    if (ctx->detectBack && wcscmp(nameW, L"button_secondary_1") == 0)
+        optionNode = OPTION_BACK_NODE;
     if (ctx->optionTrace) {
         if (wcscmp(nameW, L"button_secondary_1") == 0) optionNode = OPTION_BACK_NODE;
         else if (wcscmp(nameW, L"button_secondary_2_2") == 0) optionNode = OPTION_WAITING_NODE;
@@ -385,15 +443,17 @@ static void walk_node(void *node, int depth, struct TextCtx *ctx, int seat, enum
         wchar_t text[TEXT_MAXCHARS + 1] = {0};
         int isWidget = 0;
         if (optionNode && read_label(node, text, &isWidget)) {
-            if (optionNode == OPTION_BACK_NODE && _wcsicmp(text, L"I'm Back") == 0)
+            if (optionNode == OPTION_BACK_NODE && _wcsicmp(text, L"I'm Back") == 0) {
                 ctx->optionTrace |= OPTION_BACK_LABEL;
+                ctx->backPosition = read_back_position(ctx, node);
+            }
             if (optionNode == OPTION_WAITING_NODE && _wcsicmp(text, L"Unjoin Waiting List") == 0)
                 ctx->optionTrace |= OPTION_WAITING_LABEL;
         }
         if (begin && nchildren > 0)
             for (int i = 0; i < nchildren && i < 64; i++)
                 if (!IsBadReadPtr(begin + i, 4))
-                    walk_node(*(void **)(begin + i), depth + 1, ctx, 0, TABLE_OTHER, optionNode);
+                    walk_node(*(void **)(begin + i), depth + 1, ctx, 0, TABLE_OTHER, optionNode, preplay);
         return;
     }
     if (wcscmp(nameW, L"Board") == 0) {
@@ -416,7 +476,12 @@ static void walk_node(void *node, int depth, struct TextCtx *ctx, int seat, enum
     int hasText = 0;
     int isWidget = 0;
     int findHero = seat && ctx->heroNick && !ctx->heroSeat;
-    if (role != TABLE_OTHER || findHero) hasText = read_label(node, textW, &isWidget);
+    if (role != TABLE_OTHER || findHero || optionNode == OPTION_BACK_NODE)
+        hasText = read_label(node, textW, &isWidget);
+    if (hasText && optionNode == OPTION_BACK_NODE && _wcsicmp(textW, L"I'm Back") == 0) {
+        ctx->backVisible = 1;
+        ctx->backPosition = read_back_position(ctx, node);
+    }
     if (hasText && findHero && _wcsicmp(textW, ctx->heroNick) == 0) ctx->heroSeat = seat;
     if (hasText && role == TABLE_ACTION &&
         (_wcsicmp(textW, L"Raise") == 0 || _wcsnicmp(textW, L"Raise To", 8) == 0 ||
@@ -462,7 +527,7 @@ static void walk_node(void *node, int depth, struct TextCtx *ctx, int seat, enum
         int n = nchildren > 64 ? 64 : nchildren;
         for (int i = 0; i < n; i++)
             if (!IsBadReadPtr(begin + i, 4))
-                walk_node(*(void **)(begin + i), depth + 1, ctx, seat, role, optionNode);
+                walk_node(*(void **)(begin + i), depth + 1, ctx, seat, role, optionNode, preplay);
     }
 }
 
@@ -729,6 +794,17 @@ static BOOL CALLBACK text_cb(HWND hwnd, LPARAM lp)
     return TRUE;
 }
 
+static void set_scene_scale(struct TextCtx *ctx, void *scene)
+{
+    if (!p_getContentSize || ctx->clientW <= 0 || ctx->clientH <= 0) return;
+    const float *size = p_getContentSize(scene);
+    if (!IsBadReadPtr(size, sizeof(float) * 2) &&
+        size[0] >= 100 && size[0] <= 10000 && size[1] >= 100 && size[1] <= 10000) {
+        ctx->scaleX = ctx->clientW / size[0];
+        ctx->scaleY = ctx->clientH / size[1];
+    }
+}
+
 static void scan_table(BYTE *sh, int idx, LONG request)
 {
     BYTE *slot = slot_ptr(sh, idx);
@@ -740,18 +816,24 @@ static void scan_table(BYTE *sh, int idx, LONG request)
         cocos_bind();
         enum CocosScanStatus status = g_bind_status;
         if (g_cocos_bound) status = SCAN_EXPORTS_MISSING;
-        struct TextCtx trace = {0};
+        RECT rect = {0};
+        GetClientRect(table, &rect);
+        struct TextCtx trace = { .slot = slot, .clientW = rect.right, .clientH = rect.bottom };
         if (g_cocos_bound && g_can_find_view && p_isVisible && p_getName) {
             void *director = p_getInstance();
             status = SCAN_DIRECTOR_MISSING;
             void *scene = director ? table_scene(director, table, &status) : NULL;
             if (scene) {
                 trace.optionTrace = OPTION_TRACE_WALKED;
-                walk_node(scene, 0, &trace, 0, TABLE_OTHER, 0);
+                set_scene_scale(&trace, scene);
+                walk_node(scene, 0, &trace, 0, TABLE_OTHER, 0, -1);
                 status = SCAN_WALKED;
             }
         }
         *(DWORD *)(slot + OPTION_TRACE_RESULT) = trace.optionTrace;
+        *(DWORD *)(slot + TEXT_COUNT) = (DWORD)trace.count;
+        slot[SITOUT_INTENT] = sitout_intent(&trace);
+        *(DWORD *)(slot + BACK_POSITION) = trace.optionTrace & OPTION_BACK_LABEL ? trace.backPosition : 0;
         InterlockedExchange((volatile LONG *)(slot + 0x19EC), status);
         InterlockedExchange((volatile LONG *)(slot + 0x19DC), request);
         return;
@@ -764,7 +846,8 @@ static void scan_table(BYTE *sh, int idx, LONG request)
     RECT rc = {0, 0, 0, 0};
     int cw = 0, chh = 0;
     if (GetClientRect(table, &rc)) { cw = rc.right - rc.left; chh = rc.bottom - rc.top; }
-    struct TextCtx tctx = { .slot = slot, .table = table, .clientW = cw, .clientH = chh, .boardCards = -1 };
+    struct TextCtx tctx = { .slot = slot, .table = table, .clientW = cw, .clientH = chh, .boardCards = -1,
+        .detectBack = slot[BACK_DETECTION] };
     wchar_t title[512] = {0};
     GetWindowTextW(table, title, ARRAYSIZE(title));
     const wchar_t *login = wcsstr(title, L"Logged In as ");
@@ -784,15 +867,8 @@ static void scan_table(BYTE *sh, int idx, LONG request)
         if (director)
             scene = g_can_find_view ? table_scene(director, table, &status) : p_getRunningScene(director);
         if (scene) {
-            if (p_getContentSize && cw > 0 && chh > 0) {
-                const float *size = p_getContentSize(scene);
-                if (size && !IsBadReadPtr(size, 2 * sizeof(float)) &&
-                    size[0] >= 100 && size[0] <= 10000 && size[1] >= 100 && size[1] <= 10000) {
-                    tctx.scaleX = cw / size[0];
-                    tctx.scaleY = chh / size[1];
-                }
-            }
-            walk_node(scene, 0, &tctx, 0, TABLE_OTHER, 0);
+            set_scene_scale(&tctx, scene);
+            walk_node(scene, 0, &tctx, 0, TABLE_OTHER, 0, -1);
             status = SCAN_WALKED;
 #if defined(__i386__)
             if (tctx.board) {
@@ -826,6 +902,7 @@ static void scan_table(BYTE *sh, int idx, LONG request)
     *(LONG *)(slot + 0x19D8) = tctx.boardCards;
     *(LONG *)(slot + BETSCRIPT_HERO_SEAT) = tctx.heroSeat;
     *(LONG *)(slot + BETSCRIPT_AMOUNT) = tctx.canSetAmount;
+    *(DWORD *)(slot + BACK_POSITION) = tctx.backVisible ? tctx.backPosition : 0;
 #if defined(__i386__)
     AcquireSRWLockShared(&action_lock);
 #endif
@@ -836,7 +913,8 @@ static void scan_table(BYTE *sh, int idx, LONG request)
 #endif
     *(DWORD *)(slot + 0x19F0) = (DWORD)tctx.nodes;   /* diag: nodi visitati */
     *(DWORD *)(slot + 0x19F4) = (DWORD)tctx.count;   /* diag: label raccolte */
-    *(DWORD *)(slot + OPTION_TRACE_RESULT) = tctx.optionTrace;
+    slot[SITOUT_INTENT] = sitout_intent(&tctx);
+    *(DWORD *)(slot + OPTION_TRACE_RESULT) = tctx.backVisible ? OPTION_BACK_LABEL : 0;
 
     /* Segnala la scansione completata. */
     slot[0x15C] = 1;

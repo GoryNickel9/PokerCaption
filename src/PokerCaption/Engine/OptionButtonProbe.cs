@@ -34,7 +34,8 @@ internal static class OptionButtonProbe
         shared.SetTableHwnd(slot, table);
         shared.EnableOptionButtonTrace(slot, true);
         log.WriteLine($"Table 0x{value:X}");
-        (int Scan, SharedMemory.OptionButtonTrace Buttons)? previous = null;
+        (int Scan, SharedMemory.OptionButtonTrace Buttons, System.Drawing.Point? BackPosition, byte SitOutIntent)? previous = null;
+        string previousNodes = null;
         long end = Environment.TickCount64 + 120_000;
         while (Environment.TickCount64 < end && NativeMethods.GetWindowThreadProcessId(table, out uint current) == thread && current == process)
         {
@@ -44,11 +45,19 @@ internal static class OptionButtonProbe
             while (shared.ReadTableScanId(slot) != request && Environment.TickCount64 < next) Thread.Sleep(50);
             if (shared.ReadTableScanId(slot) != request) return Fail("No scan response within one second. Probe stopped.");
 
-            var trace = shared.ReadOptionButtonTrace(slot);
+            var result = shared.ReadOptionButtonTrace(slot);
+            var trace = (result.Scan, result.Buttons, BackPosition: shared.ReadBackPosition(slot), SitOutIntent: shared.ReadSitOutIntent(slot));
             if (trace != previous)
             {
-                log.WriteLine($"{DateTime.Now:HH:mm:ss.fff} {(SharedMemory.CocosScanStatus)trace.Scan} {trace.Buttons}");
+                log.WriteLine($"{DateTime.Now:HH:mm:ss.fff} {(SharedMemory.CocosScanStatus)trace.Scan} {trace.Buttons} back={trace.BackPosition} sit-out={trace.SitOutIntent:X2}");
                 previous = trace;
+            }
+            string nodes = string.Join(" | ", shared.ReadTableTexts(slot)
+                .Select(item => $"{item.rect.X + 1}/{item.rect.Y} {item.node} {item.text}"));
+            if (nodes != previousNodes)
+            {
+                log.WriteLine("checkbox nodes: " + nodes);
+                previousNodes = nodes;
             }
             int remaining = (int)(next - Environment.TickCount64);
             if (remaining > 0) Thread.Sleep(remaining);

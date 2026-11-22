@@ -7,13 +7,11 @@ namespace PokerCaption;
 
 public sealed partial class MainUiController
 {
-    private TableManagerPanel _tableManagerPanel;
 
     private void WireTableManager(Form form)
     {
         var service = Program.Service;
-        if (service != null)
-            _tableManagerPanel = AttachTableManager(form, service.Manager, Program.Ini);
+        if (service != null) AttachTableManager(form, service.Manager, Program.Ini);
     }
 
     internal static TableManagerPanel AttachTableManager(Form form, TableManagerEngine manager,
@@ -44,16 +42,13 @@ internal sealed class TableManagerPanel : Panel
     private readonly Label _status = new() { AutoSize = true };
     private readonly Button _duplicate;
     private readonly Button _delete;
-    private readonly Button _apply;
     private readonly Button _add;
     private readonly Button _remove;
     private readonly Button _up;
     private readonly Button _down;
     private readonly GroupBox _geometry = new() { Text = "Slot geometry", Name = "SlotGeometry" };
     private TableManagerConfig _draft;
-    private TableManagerConfig.Slot[] _savedHomes;
     private bool _loading;
-    private bool _dirty;
 
     public TableManagerPanel(TableManagerEngine manager, IniFile ini)
     {
@@ -85,10 +80,7 @@ internal sealed class TableManagerPanel : Panel
         Field(_geometry, "Top", _top, 99, 22, 75);
         Field(_geometry, "Width", _width, 13, 75, 75);
 
-        _apply = ButtonAt(this, "Save and activate", 20, 495, 132, Apply);
-        _apply.BackColor = DesktopWindow.Accent;
-        _apply.ForeColor = Color.White;
-        Put(this, _status, 165, 502);
+        Put(this, _status, 20, 502);
 
         _enabled.CheckedChanged += (_, _) => Run(() =>
         {
@@ -97,7 +89,7 @@ internal sealed class TableManagerPanel : Panel
         _profiles.SelectedIndexChanged += (_, _) => Run(SelectProfile);
         _slots.SelectedIndexChanged += (_, _) => { if (!_loading) DisplaySlot(); };
         foreach (var control in new[] { _left, _top, _width })
-            control.ValueChanged += (_, _) => UpdateSlot();
+            control.ValueChanged += (_, _) => Run(UpdateSlot);
         Run(Reload);
     }
 
@@ -133,23 +125,17 @@ internal sealed class TableManagerPanel : Panel
     private void SelectProfile()
     {
         if (_loading) return;
-        if (ConfirmDiscard()) ReadDraft();
-        else
-        {
-            _loading = true;
-            _profiles.SelectedItem = _draft?.Name;
-            _loading = false;
-        }
+        if (_profiles.SelectedItem is string name && !IsCurrentLayout(name))
+            UpdateSetting("TableManagerConfig", name);
+        ReadDraft();
+        DisplayEnabled();
     }
 
     private void ReadDraft()
     {
-        _manager.ClearGeometryPreview();
         _draft = _profiles.SelectedItem is string name
             ? TableManagerConfig.Load(_manager.ConfigDir, name) : null;
-        RememberSavedSlots();
-        _dirty = false;
-        _duplicate.Enabled = _delete.Enabled = _apply.Enabled = _draft != null;
+        _duplicate.Enabled = _delete.Enabled = _draft != null;
         RefreshSlots(0);
         UpdateStatus();
     }
@@ -188,90 +174,87 @@ internal sealed class TableManagerPanel : Panel
     {
         int i = _slots.SelectedIndex;
         if (_loading || i < 0) return;
+        var previous = Slots.ToArray();
         var slot = Slots[i];
         slot.Left = (int)_left.Value;
         slot.Top = (int)_top.Value;
         slot.Width = (int)_width.Value;
+        SaveLayout(previous);
         _slots.Items[i] = SlotLabel(slot, i);
-        if (IsCurrentLayout())
-        {
-            int savedIndex = Array.IndexOf(_savedHomes, slot);
-            if (savedIndex >= 0) _manager.PreviewGeometry(savedIndex, slot);
-        }
-        MarkDirty();
     }
 
     private void AddSlot()
     {
         if (Slots == null || Slots.Count >= TableManagerConfig.MaxSlots) return;
         var workArea = Screen.FromControl(this).WorkingArea;
+        var previous = Slots.ToArray();
         Slots.Add(new TableManagerConfig.Slot
         {
             Left = workArea.Left, Top = workArea.Top, Width = 640
         });
+        SaveLayout(previous);
         RefreshSlots(Slots.Count - 1);
-        MarkDirty();
     }
 
     private void RemoveSlot()
     {
         int i = _slots.SelectedIndex;
         if (i < 0) return;
-        if (IsCurrentLayout())
-        {
-            int savedIndex = Array.IndexOf(_savedHomes, Slots[i]);
-            if (savedIndex >= 0) _manager.ClearGeometryPreview(savedIndex);
-        }
+        var previous = Slots.ToArray();
         Slots.RemoveAt(i);
+        SaveLayout(previous);
         RefreshSlots(i);
-        MarkDirty();
     }
 
     private void Reorder(int delta)
     {
         int i = _slots.SelectedIndex, j = i + delta;
         if (i < 0 || j < 0 || j >= Slots.Count) return;
+        var previous = Slots.ToArray();
         (Slots[i], Slots[j]) = (Slots[j], Slots[i]);
+        SaveLayout(previous);
         RefreshSlots(j);
-        MarkDirty();
     }
 
     private void Create(bool duplicate)
     {
-        if (!duplicate && !ConfirmDiscard()) return;
-        using var dialog = Dialog(duplicate ? "Duplicate layout" : "New layout", 320, 114);
+        using var dialog = Dialog(UiLanguage.Text(duplicate ? "Duplicate layout" : "New layout"), 320, 114);
         var input = new TextBox { AccessibleName = "Layout name", Text = duplicate ? _draft.Name + " copy" : "" };
         Field(dialog, "Layout name", input, 12, 10, 296);
         DialogButtons(dialog, "Create");
+        UiLanguage.Apply(dialog);
         if (dialog.ShowDialog(FindForm()) != DialogResult.OK) return;
         var name = input.Text.Trim();
         (duplicate ? _draft : new TableManagerConfig()).Save(_manager.ConfigDir, name, overwrite: false);
-        ReloadProfiles(name);
+        UpdateSetting("TableManagerConfig", name);
+        Reload();
     }
 
     private void DeleteProfile()
     {
-        if (_draft == null || MessageBox.Show(FindForm(), $"Delete layout “{_draft.Name}”?",
-            "Delete layout", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2)
+        if (_draft == null || MessageBox.Show(FindForm(), string.Format(UiLanguage.Text("Delete layout “{0}”?"), _draft.Name),
+            UiLanguage.Text("Delete layout"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2)
             != DialogResult.Yes) return;
 
         var name = _draft.Name;
-        if (string.Equals(name, _manager.ConfigName, StringComparison.OrdinalIgnoreCase)) ChangeEnabled(false);
         File.Delete(TableManagerConfig.ProfilePath(_manager.ConfigDir, name));
-        _manager.Load(_ini);
+        if (IsCurrentLayout(name))
+        {
+            var next = TableManagerConfig.ListProfiles(_manager.ConfigDir).FirstOrDefault();
+            if (next != null) UpdateSetting("TableManagerConfig", next);
+            else ChangeEnabled(false);
+        }
         Reload();
     }
 
-    private void Apply()
+    private void SaveLayout(TableManagerConfig.Slot[] previous)
     {
-        if (_draft == null) return;
-        if (_draft.InactiveSlots.Count == 0 && _draft.ActiveSlots.Count == 0)
-            throw new InvalidOperationException("Add at least one slot before activating the layout.");
         _draft.Save(_manager.ConfigDir, _draft.Name);
-        UpdateSetting("TableManagerConfig", _draft.Name);
-        RememberSavedSlots();
-        _dirty = false;
-        DisplayEnabled();
+        var saved = TableManagerConfig.Load(_manager.ConfigDir, _draft.Name);
+        if (IsCurrentLayout(saved.Name))
+            _manager.UpdateSavedLayout(saved, previous.Select(slot => Slots.IndexOf(slot)).ToArray());
+        else
+            UpdateSetting("TableManagerConfig", saved.Name);
         UpdateStatus();
     }
 
@@ -282,10 +265,8 @@ internal sealed class TableManagerPanel : Panel
         UpdateStatus();
     }
 
-    private bool IsCurrentLayout() => _manager.Enabled &&
-        string.Equals(_draft?.Name, _manager.ConfigName, StringComparison.OrdinalIgnoreCase);
-
-    private void RememberSavedSlots() => _savedHomes = _draft?.InactiveSlots.ToArray() ?? [];
+    private bool IsCurrentLayout(string name) =>
+        string.Equals(name, _manager.ConfigName, StringComparison.OrdinalIgnoreCase);
 
     private void UpdateSetting(string key, string value)
     {
@@ -302,31 +283,33 @@ internal sealed class TableManagerPanel : Panel
         _manager.Load(_ini);
     }
 
-    internal bool ConfirmDiscard() => !_dirty || MessageBox.Show(FindForm(), "Discard unsaved layout changes?",
-        "Unsaved changes", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2)
-        == DialogResult.Yes;
-
-    private void MarkDirty()
-    {
-        _dirty = true;
-        UpdateStatus();
-    }
+    internal void RefreshLanguage() => UpdateStatus();
 
     private void UpdateStatus()
     {
-        var current = _manager.Config == null ? "No layout selected for use" : $"Current layout: {_manager.ConfigName}";
-        if (!_manager.Enabled) current += " (manager off)";
-        _status.Text = _dirty ? $"{current}   |   Unsaved changes" : current;
+        var current = _manager.Config == null ? UiLanguage.Text("No layout selected for use") :
+            string.Format(UiLanguage.Text("Current layout: {0}"), _manager.ConfigName);
+        if (!_manager.Enabled) current += UiLanguage.Text(" (manager off)");
+        _status.Text = current;
     }
 
     private void Run(Action action)
     {
         try { action(); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        catch (Exception ex) when (IsLayoutError(ex))
         {
+            try { Reload(); }
+            catch (Exception reloadError) when (IsLayoutError(reloadError))
+            {
+                _status.Text = $"{ex.Message} ({reloadError.Message})";
+                return;
+            }
             _status.Text = ex.Message;
         }
     }
+
+    private static bool IsLayoutError(Exception error) =>
+        error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException;
 
     private static string SlotLabel(TableManagerConfig.Slot slot, int i) =>
         $"{i + 1}.  {slot.Left}, {slot.Top}   ·   {slot.Width} px";

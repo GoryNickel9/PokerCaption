@@ -10,7 +10,7 @@ namespace PokerCaption
             using var dialog = new Form
             {
                 Name = "BetFormulaGuide",
-                Text = "BetScript formula guide",
+                Text = UiLanguage.Text("BetScript formula guide"),
                 Icon = ProductBrand.Icon,
                 BackColor = DesktopWindow.Canvas,
                 ClientSize = new Size(690, 560),
@@ -30,7 +30,7 @@ namespace PokerCaption
             using var bodyFont = new Font("Consolas", 11);
             using var headingFont = new Font(bodyFont, FontStyle.Bold);
             guide.Font = bodyFont;
-            guide.Text = """
+            string english = """
                     OPERATORS
                     Use ^ for powers, * and / for multiplication and division,
                     and + and - for addition and subtraction. Use parentheses to
@@ -67,10 +67,13 @@ namespace PokerCaption
 
                     Some table values may be unavailable on your client.
                     BetScript tries the next rule if a required value is missing.
-                    """.ReplaceLineEndings("\r\n");
-            foreach (var heading in new[] { "OPERATORS", "TABLE VALUES", "EXAMPLES", "DISPLAY" })
+                    """;
+            guide.Text = (UiLanguage.IsItalian ? UiLanguage.Text("Formula guide body") : english).ReplaceLineEndings("\r\n");
+            foreach (var heading in new[] { "OPERATORS", "TABLE VALUES", "EXAMPLES", "DISPLAY" }.Select(UiLanguage.Text))
             {
-                guide.Select(guide.Text.IndexOf(heading, StringComparison.Ordinal), heading.Length);
+                int offset = guide.Text.IndexOf(heading, StringComparison.Ordinal);
+                if (offset < 0) continue;
+                guide.Select(offset, heading.Length);
                 guide.SelectionFont = headingFont;
                 guide.SelectionColor = DesktopWindow.Accent;
             }
@@ -82,7 +85,7 @@ namespace PokerCaption
                 Dock = DockStyle.Bottom, Height = 44, Padding = new Padding(8, 5, 8, 0),
                 FlowDirection = FlowDirection.RightToLeft,
             };
-            var close = new Button { Text = "Close", AutoSize = true, DialogResult = DialogResult.Cancel };
+            var close = new Button { Text = UiLanguage.Text("Close"), AutoSize = true, DialogResult = DialogResult.Cancel };
             footer.Controls.Add(close);
             dialog.Controls.Add(body);
             dialog.Controls.Add(footer);

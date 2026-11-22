@@ -21,25 +21,27 @@ namespace PokerCaption
         private readonly DataGridView _grid;
         private readonly TextBox _search;
         private readonly Label _status;
+        private readonly Action<string> _onSaved;
+        private readonly bool _standalone;
 
-        public SettingsForm(string iniPath)
+        public SettingsForm(string iniPath, IniFile liveIni = null, Action<string> onSaved = null)
         {
             _path = iniPath;
-            _ini = PokerCaptionConfig.Load(iniPath).Raw;
+            _standalone = liveIni == null;
+            _ini = liveIni ?? PokerCaptionConfig.Load(iniPath).Raw;
+            _onSaved = onSaved;
 
-            Text = "Configurazione — PokerCaption.ini";
+            Text = UiLanguage.Text("Configuration — PokerCaption.ini");
             Icon = ProductBrand.Icon;
             Size = new Size(860, 620);
             StartPosition = FormStartPosition.CenterParent;
             Font = new Font("Segoe UI", 9f);
 
             var top = new Panel { Dock = DockStyle.Top, Height = 36, Padding = new Padding(6) };
-            _search = new TextBox { Width = 260, PlaceholderText = "cerca chiave o sezione…" };
-            var btnReload = new Button { Text = "Ricarica", AutoSize = true, Left = 280 };
-            var btnSave = new Button { Text = "Salva", AutoSize = true, Left = 370 };
+            _search = new TextBox { Width = 260, PlaceholderText = UiLanguage.Text("Search key or section…") };
+            var btnReload = new Button { Text = UiLanguage.Text("Reload"), AutoSize = true, Left = 280 };
             top.Controls.Add(_search);
             top.Controls.Add(btnReload);
-            top.Controls.Add(btnSave);
 
             _sections = new ListBox { Dock = DockStyle.Left, Width = 220, IntegralHeight = false };
             _grid = new DataGridView
@@ -52,8 +54,8 @@ namespace PokerCaption
                 SelectionMode = DataGridViewSelectionMode.CellSelect,
                 EditMode = DataGridViewEditMode.EditOnEnter
             };
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Chiave", ReadOnly = true, FillWeight = 40 });
-            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Valore", FillWeight = 60 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = UiLanguage.Text("Key"), ReadOnly = true, FillWeight = 40 });
+            _grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = UiLanguage.Text("Value"), FillWeight = 60 });
 
             _status = new Label { Dock = DockStyle.Bottom, Height = 22, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(6, 0, 0, 0) };
 
@@ -65,8 +67,8 @@ namespace PokerCaption
             _sections.SelectedIndexChanged += (s, e) => ShowSection(_sections.SelectedItem as string);
             _search.TextChanged += (s, e) => ApplyFilter();
             btnReload.Click += (s, e) => Reload();
-            btnSave.Click += (s, e) => SaveAll();
 
+            _grid.CellEndEdit += (_, e) => SaveCell(e.RowIndex, e.ColumnIndex);
             LoadSections();
             _status.Text = _path;
         }
@@ -80,9 +82,9 @@ namespace PokerCaption
 
         private void Reload()
         {
-            _ini = PokerCaptionConfig.Load(_path).Raw;
+            if (_standalone) _ini = PokerCaptionConfig.Load(_path).Raw;
             LoadSections();
-            _status.Text = _path + "  (ricaricato)";
+            _status.Text = _path + UiLanguage.Text(" (reloaded)");
         }
 
         private void ApplyFilter()
@@ -90,11 +92,8 @@ namespace PokerCaption
             if (_search.Text.Length == 0) { ShowSection(_sections.SelectedItem as string); return; }
             var needle = _search.Text.Trim();
             _grid.Rows.Clear();
-            foreach (var sec in _ini.Sections)
-                foreach (var kv in sec.Entries)
-                    if (kv.Key.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        sec.Name.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0)
-                        _grid.Rows.Add($"{sec.Name}.{kv.Key}", kv.Value);
+            foreach (var section in _ini.Sections)
+                AddRows(section, needle);
         }
 
         private void ShowSection(string name)
@@ -103,39 +102,43 @@ namespace PokerCaption
             if (name == null) return;
             var sec = _ini.Find(name);
             if (sec == null) return;
-            foreach (var kv in sec.Entries) _grid.Rows.Add(kv.Key, kv.Value);
-            _status.Text = $"{_path}   [{name}]  {sec.Entries.Count} chiavi";
+            AddRows(sec);
+            _status.Text = $"{_path}   [{name}]  {string.Format(UiLanguage.Text("{0} keys"), sec.Entries.Count)}";
         }
 
-        private void SaveAll()
+        private void AddRows(IniFile.Section section, string filter = null)
         {
-            // riporta nella struttura INI solo le modifiche visibili
-            if (_search.Text.Length == 0)
+            for (int i = 0; i < section.Entries.Count; i++)
             {
-                var secName = _sections.SelectedItem as string;
-                var sec = secName == null ? null : _ini.Find(secName);
-                if (sec != null)
-                {
-                    for (int i = 0; i < _grid.Rows.Count && i < sec.Entries.Count; i++)
-                    {
-                        var v = Convert.ToString(_grid.Rows[i].Cells[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-                        sec.Entries[i] = new KeyValuePair<string, string>(sec.Entries[i].Key, v ?? "");
-                    }
-                }
+                var (key, value) = section.Entries[i];
+                if (filter != null && !key.Contains(filter, StringComparison.OrdinalIgnoreCase) &&
+                    !section.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)) continue;
+                int row = _grid.Rows.Add(filter == null ? key : $"{section.Name}.{key}", value);
+                _grid.Rows[row].Tag = (section.Name, i);
             }
-            else
+        }
+
+        private void SaveCell(int rowIndex, int columnIndex)
+        {
+            if (rowIndex < 0 || columnIndex != 1) return;
+            var row = _grid.Rows[rowIndex];
+            if (row.Tag is not ValueTuple<string, int> source) return;
+            var (name, index) = source;
+            var section = _ini.Find(name);
+            if (section == null || index >= section.Entries.Count) return;
+            var (key, previous) = section.Entries[index];
+            string value = Convert.ToString(row.Cells[1].Value) ?? "";
+            if (value == previous) return;
+
+            try { _ini.SaveChanges(name, current => current.Entries[index] = new(key, value)); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                foreach (DataGridViewRow row in _grid.Rows)
-                {
-                    var full = Convert.ToString(row.Cells[0].Value);
-                    var val = Convert.ToString(row.Cells[1].Value) ?? "";
-                    int dot = full.IndexOf('.');
-                    if (dot <= 0) continue;
-                    _ini.Set(full.Substring(0, dot), full.Substring(dot + 1), val);
-                }
+                row.Cells[1].Value = previous;
+                _status.Text = ex.Message;
+                return;
             }
-            _ini.Save();
-            _status.Text = $"{_path}   salvato (backup .ini_bak) alle {DateTime.Now:HH:mm:ss}";
+            _onSaved?.Invoke(name);
+            _status.Text = $"{_path}   {UiLanguage.Text("Saved")} ({DateTime.Now:HH:mm:ss})";
         }
     }
 }

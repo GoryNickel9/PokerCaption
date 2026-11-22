@@ -78,8 +78,6 @@ public sealed partial class AutoDialogEngine
         foreach (var (key, caption) in new[]
         {
             ("CloseTableHasBeenClosed", TableClosed.Caption),
-            ("CloseTableHasConcluded", TableConcluded.Caption),
-            ("CloseTournamentIsOver", TournamentEnded.Caption),
         })
         {
             using var table = new ClosureTestForm("Options test table");
@@ -196,64 +194,6 @@ public sealed partial class AutoDialogEngine
             engine.SetClosureTables(Array.Empty<IntPtr>());
         }
 
-        CheckTournamentLobbyClosures(check);
-    }
-
-    private static void CheckTournamentLobbyClosures(Action<string, bool, string> check)
-    {
-        var closer = new TournamentLobbyCloser(null);
-        closer.SetEnabled(true);
-        using var lobby = new ClosureTestForm("Tournament 123456 Lobby");
-        using var unrelated = new ClosureTestForm("Tournament 123457 Lobby");
-        using var untitled = new ClosureTestForm("");
-        using var first = new ClosureTestForm("Table '123456 1' 9-max Level III (100/200)");
-        using var second = new ClosureTestForm("Menkab - 100/200 - Tournament 123456 Table 2");
-        lobby.Show();
-        unrelated.Show();
-        untitled.Show();
-        first.Show();
-        second.Show();
-        TableInfo Table(ClosureTestForm form)
-        {
-            var table = new TableInfo { Hwnd = form.Handle, Title = form.Text };
-            TitleParser.Apply(table);
-            return table;
-        }
-
-        closer.Observe(new[] { Table(first), Table(second) });
-        first.Close();
-        second.Hide();
-        closer.Observe(Array.Empty<TableInfo>());
-        Application.DoEvents();
-        check("Options WinForms shared tournament lobby stays open after first table", lobby.Visible &&
-            lobby.CloseMessages == 0 && second.IsHandleCreated, "");
-        second.Close();
-        closer.Observe(Array.Empty<TableInfo>());
-        Application.DoEvents();
-        check("Options WinForms closes only the lobby of the final table", !lobby.Visible && lobby.CloseMessages == 1 &&
-            unrelated.Visible && unrelated.CloseMessages == 0 && untitled.Visible && untitled.CloseMessages == 0, "");
-
-        using var candidate = new ClosureTestForm("Tournament 654321 Lobby");
-        using var duplicate = new ClosureTestForm("Tournament 654321 Lobby - duplicate");
-        using var last = new ClosureTestForm("Table '654321 1' 9-max Level I (10/20)");
-        candidate.Show();
-        duplicate.Show();
-        last.Show();
-        closer.Observe(new[] { Table(last) });
-        duplicate.Close();
-        last.Close();
-        closer.Observe(Array.Empty<TableInfo>());
-        Application.DoEvents();
-        check("Options WinForms ambiguous tournament lobby stays open", candidate.Visible && candidate.CloseMessages == 0, "");
-
-        using var disabledTable = new ClosureTestForm("Table '654321 2' 9-max Level I (10/20)");
-        disabledTable.Show();
-        closer.Observe(new[] { Table(disabledTable) });
-        closer.SetEnabled(false);
-        disabledTable.Close();
-        closer.Observe(Array.Empty<TableInfo>());
-        Application.DoEvents();
-        check("Options WinForms disabled tournament lobby rule leaves window open", candidate.Visible && candidate.CloseMessages == 0, "");
     }
 
     private sealed class ClosureTestForm : Form

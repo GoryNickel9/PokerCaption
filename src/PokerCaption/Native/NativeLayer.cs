@@ -24,6 +24,16 @@ namespace PokerCaption.Native
         [DllImport("user32.dll")] public static extern bool IsHungAppWindow(IntPtr hWnd);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
         [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] private static extern bool GetLastInputInfo(ref LastInputInfo info);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct LastInputInfo { public uint Size, Tick; }
+
+        internal static uint? ReadLastInputTick()
+        {
+            var info = new LastInputInfo { Size = (uint)Marshal.SizeOf<LastInputInfo>() };
+            return GetLastInputInfo(ref info) ? info.Tick : null;
+        }
         [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT pt);
         [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT pt);
         [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hwnd, ref POINT pt);
@@ -244,6 +254,22 @@ namespace PokerCaption.Native
         {
             var p = (byte*)SlotAddress(_base, slot);
             return p == null ? default : (*(int*)(p + 0x19EC), (OptionButtonTrace)(*(int*)(p + 0x19E0)));
+        }
+
+        internal unsafe byte ReadSitOutIntent(int slot)
+        {
+            var p = (byte*)SlotAddress(_base, slot);
+            return p == null ? (byte)0 : p[0x19D6];
+        }
+
+        internal void EnableBackDetection(int slot, bool enabled) => SetSlotFlag(slot, 0x19D5, enabled ? (byte)1 : (byte)0);
+
+        internal unsafe Point? ReadBackPosition(int slot)
+        {
+            var p = (byte*)SlotAddress(_base, slot);
+            if (p == null) return null;
+            uint packed = *(uint*)(p + 0x2664);
+            return packed == 0 ? null : new Point((int)(packed & 0xffff), (int)(packed >> 16));
         }
 
         internal void EnableOptionButtonTrace(int slot, bool enabled) => SetSlotFlag(slot, 0x19D4, enabled ? (byte)1 : (byte)0);

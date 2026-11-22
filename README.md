@@ -33,22 +33,13 @@ Ogni aggiornamento dell’HUD usa i dati già acquisiti. I pannelli HUD sono fin
 | --- | --- |
 | **Table HUD** | Abilita o disabilita gli overlay dei pannelli tavolo e giocatore. **Lock HUD** blocca il trascinamento dei pannelli giocatore. I pannelli tavolo sono già disposti automaticamente in colonna. |
 | **General HUD** | Mostra o nasconde l’overlay di sessione. **Lock General HUD** blocca il trascinamento dell’intero overlay. Quando è sbloccato, l’ultima posizione viene salvata. |
-| **Table panels** | Mostra dati del tavolo in una colonna centrata nella parte alta. **Format** combina testo e tag. **Insert tag** propone importo da chiamare in BB, pot odds in percentuale e generatore casuale. **Visible** controlla la visibilità del singolo pannello e **Text colour** il colore. |
-| **Player panels** | Mostra i formati vicino ai posti. **Insert tag** propone `[actions]`, che mostra le azioni avversarie per street. Hero è escluso dallo storico visualizzato. **Visible** e **Text colour** agiscono sul pannello selezionato. Un pannello giocatore sbloccato può essere spostato per posto. |
+| **Table panels** | Mostra dati del tavolo in una colonna centrata nella parte alta. **Format** combina testo e tag. **Insert tag** propone importo da chiamare in BB, pot odds in percentuale e generatore casuale. **Visible** controlla la visibilità. **Text colour**, **Font** e **Background** impostano il colore del testo, la dimensione del carattere e il colore di sfondo del pannello. |
+| **Player panels** | Mostra i formati vicino ai posti. **Insert tag** propone `[actions]`, che mostra le azioni avversarie per street. Hero è escluso dallo storico visualizzato. **Visible**, **Text colour**, **Font** e **Background** agiscono sul pannello selezionato. Un pannello giocatore sbloccato può essere spostato per posto. |
 | **General HUD panels** | **Format** e **Insert tag** permettono di inserire testo, numero di mani, tempo di sessione e mani per ora. **Text colour**, **Font** e **Background** controllano l’aspetto. Quando l’overlay generale è attivo, tutte le righe sono visibili, centrate e con sfondo opaco. |
 | **Azioni sulle liste** | **Add** crea un pannello, **Delete** rimuove il selezionato e **Up / Down** cambia l’ordine. **Duplicate** duplica un pannello tavolo o giocatore. Nel selettore di tag, **Filter tags** restringe la lista, **Insert** inserisce il tag al cursore e **Cancel** chiude il selettore. |
-| **Action symbols** | La colonna **Action** identifica l’azione. **Symbol** cambia il testo mostrato, compreso il separatore fra street. **Add timings** aggiunge i secondi accanto alle azioni con timestamp osservabile. **Apply** salva e lascia aperto il dialogo, **Ok** salva e chiude, **Cancel** scarta le modifiche successive all’ultimo salvataggio. |
+| **Action symbols** | La colonna **Action** identifica l’azione. **Symbol** cambia il testo mostrato, compreso il separatore fra street. **Add timings** aggiunge i secondi accanto alle azioni con timestamp osservabile. I simboli si salvano al termine della modifica della cella. La casella dei tempi si salva al cambio e il pulsante **Close** chiude la finestra. |
 
 Un’azione può avere un simbolo senza durata se è stata recuperata da un’etichetta visibile. Lo storico parte dalle osservazioni disponibili: le azioni già scomparse prima della lettura non possono essere ricostruite. Il menu contestuale del General HUD permette di azzerare il tempo, le mani della sessione o tutti i tag di sessione. `[handsPerHour]` si aggiorna a ogni nuova mano registrata usando il tempo attivo accumulato e resta fermo tra le mani. Fino a quando il tempo attivo è zero mostra `0`. I reset di tempo o mani azzerano anche il valore derivato.
-
-### Table Layout
-
-| Controllo | Comportamento |
-| --- | --- |
-| **Enable Table Manager** | Abilita l’assegnazione e il ridimensionamento delle finestre. I nuovi tavoli prendono il primo slot libero. Quando tutti gli slot sono occupati, il nuovo tavolo resta nella posizione scelta dal client finché si libera uno slot. Un trascinamento su uno slot occupato scambia le assegnazioni. Un tavolo rilasciato fuori dagli slot resta libero. Nei client compatibili i nuovi tavoli possono usare gli slot attivi già definiti nel profilo. |
-| **Layout**, **New**, **Duplicate**, **Delete** | Selezionano il profilo da modificare, ne creano uno vuoto, duplicano quello selezionato o lo eliminano dopo conferma. La scelta nella lista prepara la modifica. **Save and activate** salva il profilo e lo rende quello in uso. |
-| **Add slot**, **Up**, **Down**, **Remove** | Creano uno slot base, cambiano la priorità di assegnazione o rimuovono lo slot selezionato. |
-| **Slot geometry** | **Left** e **Top** indicano la posizione sul desktop. **Width** imposta la larghezza in pixel. L’altezza segue le proporzioni del tavolo. La geometria degli slot già assegnati nel profilo attivo si può provare prima del salvataggio. |
 
 ### BetScript
 
@@ -56,22 +47,33 @@ Un’azione può avere un simbolo senza durata se è stata recuperata da un’et
 
 Le formule supportano operatori aritmetici, parentesi e il suffisso `bb` per esprimere un valore in grandi bui. `pot` è il piatto corrente, `spot` il piatto a inizio street, `ante` l’ante per giocatore e `antes` il totale degli ante. `bet` indica l’importo da pareggiare, `raise` l’ultima puntata o rilancio osservato, `hbet` il contributo di Hero nella street e `call` quanto serve per chiamare. `stack`, `effStack`, `betbox`, `sb` e `bb` indicano stack, stack effettivo, campo importo e bui. Alcuni valori dipendono dal client e dallo stato della mano. Per esempio `pot * 0.5` calcola metà piatto e `3.5bb` indica 3,5 grandi bui. `@0`–`@15` imposta il numero di decimali, con predefinito `2`, e `@H` lascia invariato il testo nel campo.
 
+### Table Layout
+
+| Controllo | Comportamento |
+| --- | --- |
+| **Enable Table Manager** | Abilita l’assegnazione e il ridimensionamento delle finestre. I nuovi tavoli prendono il primo slot libero. Quando tutti gli slot sono occupati, il nuovo tavolo resta nella posizione scelta dal client finché si libera uno slot. Un trascinamento su uno slot occupato scambia le assegnazioni. Un tavolo rilasciato fuori dagli slot resta libero. Nei client compatibili i nuovi tavoli possono usare gli slot attivi già definiti nel profilo. |
+| **Layout**, **New**, **Duplicate**, **Delete** | Selezionano il profilo da modificare, ne creano uno vuoto, duplicano quello selezionato o lo eliminano dopo conferma. La selezione del profilo viene salvata prima di attivarlo. Le modifiche agli slot vengono salvate nello stesso modo. |
+| **Add slot**, **Up**, **Down**, **Remove** | Creano uno slot base, cambiano la priorità di assegnazione o rimuovono lo slot selezionato. |
+| **Slot geometry** | **Left** e **Top** indicano la posizione sul desktop. **Width** imposta la larghezza in pixel. L’altezza segue le proporzioni del tavolo. Le modifiche alla geometria si applicano ai tavoli assegnati dopo il salvataggio. |
+
 ### Options
 
 | Gruppo | Controlli |
 | --- | --- |
-| **Application** | **Minimize to tray** nasconde la finestra principale nell’area di notifica quando viene minimizzata. **Close PokerCaption after the last client closes** chiude PokerCaption dopo che l’ultima lobby o finestra tavolo è sparita. La funzione si attiva dopo il primo client rilevato. |
-| **Table preferences** | **Never sit out** è la preferenza unica per tavoli cash e tornei. Sia questa voce sia **Maximum** sono ancora disabilitate. |
-| **Table closure** | I tre **Auto close** chiudono rispettivamente il tavolo segnato come chiuso, il tavolo su cui il gioco è terminato e il tavolo quando il torneo è finito. **Close tournament lobby when its last table closes** chiude la lobby del torneo identificato quando il suo ultimo tavolo viene chiuso. |
+| **Application** | **Minimize to tray** nasconde la finestra principale nell’area di notifica quando viene minimizzata. **Close PokerCaption after the client closes** chiude PokerCaption dopo che l’ultima lobby o finestra tavolo è sparita. La funzione si attiva dopo il primo client rilevato. |
+| **Table preferences** | **Never sit out** è la preferenza unica per cash e tornei. Su Sisal osserva le caselle di sit-out prima della comparsa di **I’m Back**. Se durante il turno la casella del sit-out risulta vuota e il pulsante compare subito dopo senza input dell’utente, tenta il rientro usando la transizione. Una pausa selezionata viene rispettata. Quando la transizione è ambigua, cerca il marcatore `has timed out` per Hero nella cronologia scritta a fine mano. Il tavolo deve essere in primo piano e sotto il cursore. La conferma a fine mano richiede la cronologia locale di Sisal. Se attivi **Maximum**, scegli da 1 a 999 tentativi automatici per ciascun tavolo. Il contatore si azzera quando chiudi il relativo tavolo. |
+| **Table closure** | **Auto close ‘This table has been closed’ tables** chiude il tavolo associato a un avviso che lo dichiara chiuso. |
 
 In **Dialogs** ogni voce lavora sul dialogo riconosciuto. Le opzioni di chiusura hanno questi ambiti.
 
 | Voci | Risultato |
 | --- | --- |
 | **table is closed** | Chiude il dialogo che segnala la chiusura del tavolo. |
-| **Close Current Session Information**, **Keep playing in Current Session**, **Stay connected on inactivity timeout** | Attivano rispettivamente i pulsanti di chiusura della scheda informativa, prosecuzione della sessione e mantenimento della connessione. |
+| **Close Current Session Information** | Preme **Close** nella finestra informativa della sessione corrente. |
+| **Keep playing in Current Session** | Preme **Keep Playing** nella finestra che chiede se si vuole continuare la sessione corrente. |
+| **Stay connected on inactivity timeout** | Preme il pulsante per mantenere la connessione quando compare l’avviso di inattività. |
 
-Le azioni sui dialoghi dipendono dal titolo, dal testo o dalla struttura del dialogo riconosciuto. Sul client renderizzato sono sospese mentre Table Manager è attivo. **Save settings**, nella barra laterale, salva le impostazioni e conserva una copia del file precedente. Nell’area di notifica, **Mostra** riapre la finestra, **Config INI…** apre l’editor locale delle impostazioni e **Esci** chiude l’applicazione.
+Le azioni sui dialoghi dipendono dal titolo, dal testo o dalla struttura del dialogo riconosciuto. Sul client renderizzato sono sospese mentre Table Manager è attivo. Le preferenze dei menu vengono salvate quando si modificano e applicate dopo la scrittura, con una copia del file precedente. **Language**, in **Options**, cambia subito la lingua della finestra principale e della configurazione dei simboli. Le formule, i tag e i messaggi ricevuti dal client conservano la loro sintassi. Il programma si apre sempre sulla pagina **HUD**. Nell’area di notifica, **Mostra** riapre la finestra, **Config INI…** apre l’editor locale delle impostazioni e **Esci** chiude l’applicazione.
 
 ## Processi, privilegi e confini di fiducia
 

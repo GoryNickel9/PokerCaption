@@ -20,12 +20,13 @@ namespace PokerCaption.Engine
         private volatile TableInfo[] _pixelTables = Array.Empty<TableInfo>();
         private readonly SharedMemory _shared;
         private readonly Action<string> _log;
-        private readonly TournamentLobbyCloser _tournamentLobbyCloser;
         private readonly SharedMemory.ActionHookMode? _diagnosticHookMode;
         private System.Windows.Forms.Timer _timer;
         private System.Windows.Forms.Timer _hudTimer;
         private long _nextHudScan;
         private long _nextLayoutRefresh;
+        private bool _neverSitOut;
+        private int? _neverSitOutMaximum;
         private readonly object _captureGate = new();
         private readonly ManualResetEventSlim _pixelWake = new(false);
 
@@ -48,7 +49,6 @@ namespace PokerCaption.Engine
             _shared = shared;
             _log = log ?? (_ => { });
             _diagnosticHookMode = diagnosticHookMode;
-            _tournamentLobbyCloser = new TournamentLobbyCloser(_log);
             Betscript = new BetScriptEngine(_log);
             Manager = new TableManagerEngine(_log);
             AutoDialog = new AutoDialogEngine(_log);
@@ -67,14 +67,13 @@ namespace PokerCaption.Engine
             Betscript.Load(ini);
             Manager.RenderedClient = ClientProfile.Interaction == "coords";
             Manager.Load(ini);
+            SetNeverSitOut(ini);
             AutoDialog.Load(ini);
-            SetCloseTournamentLobby(ini.GetBool("PokerCaption", "CloseTrnyLobby", false));
             Hud.Load(ini);
             GenHud.Load(ini);
             Pixels.Load(ini);
         }
 
-        internal void SetCloseTournamentLobby(bool enabled) => _tournamentLobbyCloser.SetEnabled(enabled);
 
         /// <summary>Avvia il ciclo di scansione (timer UI) + thread pixel.</summary>
         public void Start()
@@ -107,7 +106,7 @@ namespace PokerCaption.Engine
                     Hud.FollowTables(_tables);
                     if (now >= _nextHudScan)
                     {
-                        _nextHudScan = Environment.TickCount64 + (Hud.Active || Betscript.Rules.Count > 0 ? 200 : ScanDelaySec * 1000);
+                        _nextHudScan = Environment.TickCount64 + (Hud.Active || Betscript.Rules.Count > 0 || _neverSitOut ? 200 : ScanDelaySec * 1000);
                         ScanHud();
                     }
                 }
@@ -132,7 +131,6 @@ namespace PokerCaption.Engine
             if (Manager.LayoutOnly)
             {
                 AutoDialog.Stop();
-                _tournamentLobbyCloser.Reset();
                 return;
             }
 
@@ -142,7 +140,6 @@ namespace PokerCaption.Engine
         public void Stop()
         {
             AutoDialog.Stop();
-            _tournamentLobbyCloser.Reset();
             _timer?.Stop();
             _timer?.Dispose();
             _timer = null;
@@ -166,7 +163,6 @@ namespace PokerCaption.Engine
         private void Tick()
         {
             var live = TableScanner.ScanTables();
-            if (!Manager.LayoutOnly) _tournamentLobbyCloser.Observe(live);
 
             for (int i = _tables.Count - 1; i >= 0; i--)
                 if (!NativeMethods.IsWindow(_tables[i].Hwnd) || !live.Any(x => x.Hwnd == _tables[i].Hwnd))
@@ -202,6 +198,8 @@ namespace PokerCaption.Engine
                     lt.ClientThreadId = NativeMethods.GetWindowThreadProcessId(lt.Hwnd, out _);
                     _tables.Add(lt);
                     _shared.SetTableHwnd(slot, lt.Hwnd, _diagnosticHookMode ?? SharedMemory.ActionHookMode.Default);
+                    _shared.EnableOptionButtonTrace(slot, false);
+                    _shared.EnableBackDetection(slot, _neverSitOut);
                     if (lt.IsTourney && lt.TotalBuyin > 0) SessionStats.Current.TotalBuyin += lt.TotalBuyin;
                     _log($"nuovo tavolo slot {slot}: '{lt.TableName}' {lt.Sb}/{lt.Bb} {(lt.IsTourney ? "T" : "C")}");
                 }
@@ -213,7 +211,10 @@ namespace PokerCaption.Engine
                     t.MaxSeats = lt.MaxSeats;
                     t.TableName = lt.TableName;
                     if (!string.Equals(t.HeroNick, lt.HeroNick, StringComparison.OrdinalIgnoreCase))
+                    {
                         t.HeroSeat = t.ConfirmedHeroSeat = 0;
+                        t.SitOutTracker = null;
+                    }
                     t.HeroNick = lt.HeroNick;
                     NativeMethods.GetWindowRect(t.Hwnd, out t.Rect);
                 }
@@ -277,6 +278,8 @@ namespace PokerCaption.Engine
                 {
                     int mask = _shared.ReadActionHookMask(t.Slot);
                     _log($"diagnostic action hooks '{t.TableName}': mode={_diagnosticHookMode}, setVisible={(mask & 8) != 0}, textMask=0x{mask & 7:X}");
+                    if (_neverSitOut)
+                        _log($"diagnostic sit-out '{t.TableName}': {_shared.ReadOptionButtonTrace(t.Slot).Buttons}, back={_shared.ReadBackPosition(t.Slot)}, inHand={t.HeroInHand}");
                 }
             }
             t.AmountToCall = null;
@@ -350,6 +353,7 @@ namespace PokerCaption.Engine
             if (scanStatus != SharedMemory.CocosScanStatus.Walked) return;
             if (Manager.RenderedClient)
                 ObserveHeroAction(t, betScriptState.CanSetAmount && t.AmountToCall.HasValue && !string.IsNullOrEmpty(t.HeroNick));
+            if (_neverSitOut && Manager.RenderedClient) ObserveSitOut(t);
             var actions = _shared.ReadSeatActionEvents(t.Slot, ref t.LastActionSequence, out bool droppedActions, out uint? snapshotTick);
             if (droppedActions) _log($"HUD: coda azioni incompleta su '{t.TableName}'");
             int street = t.ActionHistory.Observe(t.HandStamp, _shared.ReadBoardCards(t.Slot),
@@ -358,6 +362,40 @@ namespace PokerCaption.Engine
             {
                 t.Street = street;
                 ApplyScannedBetScript(t, heroStackSeen);
+            }
+        }
+
+        internal void SetNeverSitOut(IniFile ini)
+        {
+            _neverSitOutMaximum = ini.GetBool("PokerCaption", "NeverSitOutLimit", false)
+                ? Math.Clamp(ini.GetInt("PokerCaption", "NeverSitOutMaximum", 3), 1, 999)
+                : null;
+            bool enabled = ini.GetBool("PokerCaption", "NeverSitOut", false);
+            if (_neverSitOut == enabled) return;
+            _neverSitOut = enabled;
+            foreach (var table in _tables)
+            {
+                table.SitOutTracker?.ResetObservation();
+                _shared.EnableBackDetection(table.Slot, enabled);
+            }
+        }
+
+        private void ObserveSitOut(TableInfo table)
+        {
+            var trace = _shared.ReadOptionButtonTrace(table.Slot);
+            bool backVisible = trace.Buttons.HasFlag(SharedMemory.OptionButtonTrace.BackLabel);
+            var position = _shared.ReadBackPosition(table.Slot);
+            var tracker = table.SitOutTracker ??= new NeverSitOut();
+            bool canResume = tracker.ShouldResume(backVisible, table.HeroAct || (table.HeroInHand && !table.HeroSampleUnavailable), DateTime.UtcNow,
+                since => position.HasValue && NativeMethods.GetForegroundWindow() == table.Hwnd &&
+                    NeverSitOut.HasRecentTimeout(table, since), _neverSitOutMaximum,
+                (SitOutIntent)_shared.ReadSitOutIntent(table.Slot), table.HeroAct, NativeMethods.ReadLastInputTick());
+            if (canResume && position is { } point && !Manager.IsMoving(table) &&
+                CoordsEngine.ClickForegroundClientPoint(table.Hwnd, point))
+            {
+                tracker.MarkResumed();
+                string source = tracker.EarlySignal ? "transizione al sit-out" : "timeout nella cronologia";
+                _log($"Never sit out: richiesta di rientro su '{table.TableName}' tramite {source}");
             }
         }
 

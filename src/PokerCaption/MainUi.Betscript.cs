@@ -221,8 +221,7 @@ namespace PokerCaption
         private static void SaveBetscriptIni(List<BetScriptEngine.Rule> rules)
         {
             if (Program.Ini == null) return;
-            BetScriptEngine.WriteRules(Program.Ini, rules);
-            Program.Ini.Save();
+            Program.Ini.SaveChanges("AdvancedBets", _ => BetScriptEngine.WriteRules(Program.Ini, rules));
             try { Program.Service?.Betscript?.Load(Program.Ini); }
             catch (Exception ex) { Log("betscript sync ERR: " + ex.Message); }
         }

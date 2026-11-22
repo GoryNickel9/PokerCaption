@@ -13,7 +13,7 @@ namespace PokerCaption.Engine
     public sealed partial class AutoDialogEngine
     {
         [Flags]
-        private enum TableCloseReason { None = 0, Closed = 1, Concluded = 2, TournamentEnded = 4 }
+        private enum TableCloseReason { None = 0, Closed = 1 }
 
         private sealed record DialogAction(string Caption, int DelayMs, TableCloseReason TableReason = TableCloseReason.None);
         private sealed record TableCloseRequest(uint ProcessId, TableCloseReason Reasons, long? LastPostTick);
@@ -24,8 +24,6 @@ namespace PokerCaption.Engine
         }
 
         private static readonly DialogAction TableClosed = new("This table has been closed", 0, TableCloseReason.Closed);
-        private static readonly DialogAction TableConcluded = new("Play at this table has concluded", 0, TableCloseReason.Concluded);
-        private static readonly DialogAction TournamentEnded = new("Tournament is over", 0, TableCloseReason.TournamentEnded);
         private const string PokerStarsDialogButtonClass = "PokerStarsButtonClass";
         private const string FlutterDialogButtonClass = "FlutterOnlinePokerButtonClass";
         private const string NativeDialogClass = "#32770";
@@ -79,7 +77,7 @@ namespace PokerCaption.Engine
         private readonly Action<string> _log;
         private readonly Func<IntPtr, IntPtr> _lastActivePopup;
         private readonly Func<IntPtr, string> _windowClass;
-        public bool CloseTableHasBeenClosed, CloseTableHasConcluded, CloseTournamentIsOver;
+        public bool CloseTableHasBeenClosed;
 
         private DateTime _lastScan = DateTime.MinValue;
         private DateTime _lastPidRefresh = DateTime.MinValue;
@@ -167,8 +165,6 @@ namespace PokerCaption.Engine
                 _rules.Add(new DialogAction(caption.Trim(), delay));
             }
             CloseTableHasBeenClosed = ini.GetBool("PokerCaption", "CloseTableHasBeenClosed", false);
-            CloseTableHasConcluded = ini.GetBool("PokerCaption", "CloseTableHasConcluded", false);
-            CloseTournamentIsOver = ini.GetBool("PokerCaption", "CloseTournamentIsOver", false);
             _dialogButtons.Clear();
             foreach (var (key, title, button) in ButtonOptions)
                 if (ini.GetBool("PokerCaption", key, false)) _dialogButtons.Add(title, button);
@@ -194,8 +190,6 @@ namespace PokerCaption.Engine
             if (tableMessage)
             {
                 if (body == TableClosed.Caption) return TableClosed;
-                if (body.StartsWith(TableConcluded.Caption, StringComparison.Ordinal)) return TableConcluded;
-                if (body.StartsWith(TournamentEnded.Caption, StringComparison.Ordinal)) return TournamentEnded;
             }
 
             return _rules.FirstOrDefault(rule =>
@@ -396,9 +390,7 @@ namespace PokerCaption.Engine
             lock (_state)
             {
                 if (run != _runRevision || config != _configRevision) return;
-                var enabled = (CloseTableHasBeenClosed ? TableCloseReason.Closed : TableCloseReason.None) |
-                    (CloseTableHasConcluded ? TableCloseReason.Concluded : TableCloseReason.None) |
-                    (CloseTournamentIsOver ? TableCloseReason.TournamentEnded : TableCloseReason.None);
+                var enabled = CloseTableHasBeenClosed ? TableCloseReason.Closed : TableCloseReason.None;
                 foreach (var (table, request) in _tableClosures.ToArray())
                 {
                     if (!HasProcess(table, request.ProcessId))

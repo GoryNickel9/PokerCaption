@@ -12,21 +12,20 @@ namespace PokerCaption
             var controller = new MainUiController();
             var page = WorkspacePageByName(form, "Options");
             const string section = "PokerCaption";
-            Program.Ini = new IniFile(null);
+            string optionsPath = Path.Combine(Path.GetTempPath(), $"poker-caption-options-{Guid.NewGuid():N}.ini");
+            Program.Ini = new IniFile(optionsPath);
             try
             {
                 controller.WireOptions(form);
                 controller.WireDialogs(form);
 
-                foreach (var name in UnavailableOptions)
-                    check("Options unavailable " + name, Ctl(page, name) is { Enabled: false }, "");
-
-                check("Options keeps one disabled Never sit out control for cash and tournament tables",
-                    Ctl(page, "neverSitOut") is CheckBox { Text: "Never sit out", Enabled: false } &&
+                check("Options exposes one Never sit out control for cash and tournament tables",
+                    Ctl(page, "neverSitOut") is CheckBox { Text: "Never sit out", Enabled: true } &&
                     Ctl(page, "CheckBox94") == null, "");
 
                 var retiredOptions = new[] { ("CheckBox13", "AutoTimebank"), ("cbAutoHideChat", "AutoHideChat"), ("CheckBox14", "StartMinimized"),
-                    ("CheckBox82", "CloseCantFound"), ("UpDown38", "CNFafter") };
+                    ("CheckBox82", "CloseCantFound"), ("UpDown38", "CNFafter"),
+                    ("CheckBox401", "CloseTableHasConcluded"), ("CheckBox504", "CloseTournamentIsOver"), ("CheckBox283", "CloseTrnyLobby") };
                 foreach (var (control, key) in retiredOptions)
                 {
                     check("Options removed control " + control, Ctl(page, control) == null, "");
@@ -43,6 +42,7 @@ namespace PokerCaption
                         check("Options flag " + key, false, "missing checkbox");
                         continue;
                     }
+                    if (key == "NeverSitOutLimit") continue;
                     bool initial = box.Checked;
                     box.Checked = !initial;
                     bool writesToggle = Program.Ini.GetBool(section, key, initial) == !initial;
@@ -50,6 +50,19 @@ namespace PokerCaption
                     check("Options flag " + key, box.Enabled && initial == fallback && writesToggle &&
                         Program.Ini.GetBool(section, key, !initial) == initial, "");
                 }
+
+                var never = (CheckBox)Ctl(page, "neverSitOut");
+                var limit = (CheckBox)Ctl(page, "neverSitOutLimit");
+                var maximum = (NumericUpDown)Ctl(page, "neverSitOutMaximum");
+                bool initiallyOff = !limit.Enabled && !maximum.Enabled;
+                never.Checked = true;
+                bool available = limit.Enabled && !maximum.Enabled;
+                limit.Checked = true;
+                maximum.Value = 7;
+                var disk = IniFile.Load(optionsPath);
+                check("Options saves the optional per-table sit-out maximum immediately",
+                    initiallyOff && available && maximum.Enabled &&
+                    disk.GetBool(section, "NeverSitOutLimit", false) && disk.GetInt(section, "NeverSitOutMaximum") == 7, "");
 
                 check("Options dialog rule count", controller._dialogRules.Count == 1,
                     controller._dialogRules.Count.ToString());
@@ -113,12 +126,17 @@ namespace PokerCaption
                     retiredControls.All(name => Ctl(page, name) == null) &&
                     retiredKeys.All(key => Program.Ini.Get(section, key) == null), "");
                 Engine.AutoDialogEngine.CheckOptionsClosures(controller._dialogRules.Select(rule => rule.Caption), check);
-                CheckTrayAndSaveOptions(form, page, check);
+                CheckTrayAndAutosave(page, check);
             }
-            finally { Program.Ini = previousIni; }
+            finally
+            {
+                Program.Ini = previousIni;
+                File.Delete(optionsPath);
+                File.Delete(Path.ChangeExtension(optionsPath, ".ini_bak"));
+            }
         }
 
-        private static void CheckTrayAndSaveOptions(Form form, Control page, Action<string, bool, string> check)
+        private static void CheckTrayAndAutosave(Control page, Action<string, bool, string> check)
         {
             using var window = new Form
             {
@@ -141,17 +159,13 @@ namespace PokerCaption
             try
             {
                 Program.Ini = new IniFile(path);
-                Program.Ini.Set("PokerCaption", "MinimizeToTray", 1);
-                SaveBoundOptions(form);
-                bool firstSave = File.Exists(path) && !File.Exists(backup);
-                if (Ctl(page, "CheckBox34") is CheckBox minimize) minimize.Checked = false;
-                SaveBoundOptions(form);
-                bool firstBackup = !IniFile.Load(path).GetBool("PokerCaption", "MinimizeToTray", true) &&
-                    IniFile.Load(backup).GetBool("PokerCaption", "MinimizeToTray", false);
-                Program.Ini.Set("PokerCaption", "MinimizeToTray", 1);
-                SaveBoundOptions(form);
-                check("Options Save options creates and replaces with previous backup", firstSave && firstBackup &&
-                    IniFile.Load(path).GetBool("PokerCaption", "MinimizeToTray", false) &&
+                var minimize = (CheckBox)Ctl(page, "CheckBox34");
+                minimize.Checked = false;
+                bool firstSave = File.Exists(path) && !File.Exists(backup) &&
+                    !IniFile.Load(path).GetBool("PokerCaption", "MinimizeToTray", true);
+                minimize.Checked = true;
+                check("Options autosaves immediately and preserves the previous configuration as a backup",
+                    firstSave && IniFile.Load(path).GetBool("PokerCaption", "MinimizeToTray", false) &&
                     !IniFile.Load(backup).GetBool("PokerCaption", "MinimizeToTray", true), "");
             }
             finally

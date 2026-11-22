@@ -40,16 +40,26 @@ namespace PokerCaption.Engine
             BuildActionSymbolsGrid();
             BuildTimings();
 
-            var ok = new Button { Text = "Ok", Location = new Point(10, ClientSize.Height - 32), Size = new Size(75, 26) };
-            var cancel = new Button { Text = "Cancel", Location = new Point(95, ClientSize.Height - 32), Size = new Size(75, 26) };
-            var apply = new Button { Text = "Apply", Location = new Point(180, ClientSize.Height - 32), Size = new Size(75, 26) };
-            ok.Click += (s, e) => { Save(); DialogResult = DialogResult.OK; };
-            apply.Click += (s, e) => Save();
-            cancel.Click += (s, e) => DialogResult = DialogResult.Cancel;
-            Controls.Add(ok); Controls.Add(cancel); Controls.Add(apply);
-            AcceptButton = ok; CancelButton = cancel;
+            var close = new Button { Text = "Close", Location = new Point(10, ClientSize.Height - 32), Size = new Size(90, 26) };
+            close.Click += (_, _) => Close();
+            Controls.Add(close);
+            CancelButton = close;
+            FormClosing += (_, e) => e.Cancel = !_grid.EndEdit();
 
             LoadValues();
+            _grid.CellValueChanged += (_, e) =>
+            {
+                if (e.RowIndex < 0 || e.ColumnIndex != _grid.Columns["symbol"].Index) return;
+                var cell = _grid.Rows[e.RowIndex].Cells[e.ColumnIndex];
+                SaveValue("actionsSym" + ActionKey(e.RowIndex), Convert.ToString(cell.Value) ?? "", () =>
+                    cell.Value = _ini.Get("HUD", "actionsSym" + ActionKey(e.RowIndex), Rows[e.RowIndex].symbol));
+            };
+            _addTimings.CheckedChanged += (_, _) => SaveValue("actionsAddTimings", _addTimings.Checked ? "1" : "0",
+                () => _addTimings.Checked = _ini.GetBool("HUD", "actionsAddTimings", false));
+            Text = UiLanguage.Text(Text);
+            UiLanguage.Apply(this);
+            _grid.Columns["action"].HeaderText = UiLanguage.Text("Action");
+            _grid.Columns["symbol"].HeaderText = UiLanguage.Text("Symbol");
         }
 
         // ---------- griglia Action symbols ----------
@@ -78,7 +88,7 @@ namespace PokerCaption.Engine
             _grid.Columns["symbol"].FillWeight = 18;
 
             foreach (var (action, symbol) in Rows)
-                _grid.Rows.Add(action, symbol);
+                _grid.Rows.Add(UiLanguage.Text(action), symbol);
 
             group.Controls.Add(_grid);
             Controls.Add(group);
@@ -112,18 +122,20 @@ namespace PokerCaption.Engine
             _addTimings.Checked = _ini.GetBool("HUD", "actionsAddTimings", false);
         }
 
-        private void Save()
-        {
-            if (!_grid.EndEdit()) return;
-            for (int i = 0; i < _grid.Rows.Count && i < Rows.Length; i++)
-            {
-                var key = ActionKey(i);
-                _ini.Set("HUD", "actionsSym" + key, Convert.ToString(_grid.Rows[i].Cells["symbol"].Value) ?? "");
-            }
-            _ini.Set("HUD", "actionsAddTimings", _addTimings.Checked ? "1" : "0");
+        private bool _restoring;
 
-            _ini.Save();
-            _log("actions tag config: simboli/timings salvati ([HUD] actions*)");
+        private void SaveValue(string key, string value, Action restore)
+        {
+            if (_restoring) return;
+            try { _ini.SaveChanges("HUD", section => section[key] = value); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _restoring = true;
+                try { restore(); }
+                finally { _restoring = false; }
+                _log(ex.Message);
+                MessageBox.Show(this, ex.Message, "PokerCaption", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
     }
 }

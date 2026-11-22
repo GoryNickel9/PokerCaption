@@ -56,7 +56,7 @@ namespace PokerCaption.Engine
         public double OddsPct;
         public bool Locked;                   // TM2 lock tavolo in slot
         public int TablesInSlot = 1;
-        public int Sitout;                    // 0 no, 1 sitout next hand, 2 next BB…
+        internal NeverSitOut SitOutTracker;
         public bool InActiveSlot;             // posizionato in slot attivo (TM)
         public int HandStamp;                 // incrementato dal watcher a ogni hand
         public int PlacedSlot = -1;           // slot TM assegnato

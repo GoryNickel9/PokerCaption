@@ -327,6 +327,50 @@ namespace PokerCaption
             Check("formula flop assente", bs.FormulaFor(2) == null);
             BetScriptSelfTest.Run(Check);
             BetScriptSelfTest.CheckPrefill(Check);
+            var sitOutTable = new TableInfo { TableName = "Local cash", HeroNick = "Hero" };
+            const string cashHistory = "Sisal Hand #1:\nTable 'Local cash' 6-max\nHero has timed out\n*** SUMMARY ***\n";
+            const string voluntaryHistory = "Sisal Hand #2:\nTable 'Local cash' 6-max\nHero: folds\nOther has timed out\n*** SUMMARY ***\n";
+            Check("Never sit out distinguishes the local player's timeout from a voluntary pause or another player's timeout",
+                NeverSitOut.LatestCompletedHandTimedOut(cashHistory, sitOutTable) == true &&
+                NeverSitOut.LatestCompletedHandTimedOut(cashHistory + voluntaryHistory, sitOutTable) == false &&
+                NeverSitOut.LatestCompletedHandTimedOut(cashHistory, new TableInfo { TableName = "Different", HeroNick = "Hero" }) == null);
+            Check("Never sit out recognizes tournament and table numbers in hand history",
+                NeverSitOut.LatestCompletedHandTimedOut(cashHistory.Replace("Local cash", "321 4"),
+                    new TableInfo { Title = "Daily - Tournament 321 Table 4", HeroNick = "Hero" }) == true);
+            var sitOutTracker = new NeverSitOut();
+            var now = DateTime.UtcNow;
+            bool skippedExisting = !sitOutTracker.ShouldResume(true, false, now, _ => true);
+            sitOutTracker.ShouldResume(false, true, now.AddSeconds(1), _ => false);
+            bool skippedVoluntary = !sitOutTracker.ShouldResume(true, false, now.AddSeconds(2), _ => false);
+            sitOutTracker.ShouldResume(false, true, now.AddSeconds(3), _ => false);
+            bool timeoutAccepted = sitOutTracker.ShouldResume(true, false, now.AddSeconds(4), since => since == now.AddSeconds(3));
+            sitOutTracker.MarkResumed();
+            Check("Never sit out requires an observed turn and a recent timeout and attempts once per sit-out",
+                skippedExisting && skippedVoluntary && timeoutAccepted &&
+                !sitOutTracker.ShouldResume(true, false, now.AddSeconds(7), _ => true));
+            var earlyTracker = new NeverSitOut();
+            var voluntaryTracker = new NeverSitOut();
+            var changedInputTracker = new NeverSitOut();
+            foreach (var tracker in new[] { earlyTracker, voluntaryTracker, changedInputTracker })
+                tracker.ShouldResume(false, true, now, _ => false, intent: SitOutIntent.HandClear,
+                    heroDecision: true, inputTick: 42);
+            voluntaryTracker.ShouldResume(false, true, now.AddMilliseconds(100), _ => false,
+                intent: SitOutIntent.HandSelected, heroDecision: true, inputTick: 43);
+            Check("Never sit out accepts a quick transition with no user input and preserves voluntary sit-outs",
+                earlyTracker.ShouldResume(true, false, now.AddMilliseconds(200), _ => false, inputTick: 42) &&
+                earlyTracker.EarlySignal &&
+                !voluntaryTracker.ShouldResume(true, false, now.AddMilliseconds(200), _ => true, inputTick: 43) &&
+                !changedInputTracker.ShouldResume(true, false, now.AddMilliseconds(200), _ => false, inputTick: 43));
+
+            var otherSitOutTracker = new NeverSitOut();
+            sitOutTracker.ResetObservation();
+            sitOutTracker.ShouldResume(false, true, now.AddSeconds(8), _ => false);
+            otherSitOutTracker.ShouldResume(false, true, now.AddSeconds(8), _ => false);
+            Check("Never sit out enforces a separate maximum for each table and preserves attempts across reconfiguration",
+                !sitOutTracker.ShouldResume(true, false, now.AddSeconds(9), _ => true, maximum: 1) &&
+                otherSitOutTracker.ShouldResume(true, false, now.AddSeconds(9), _ => true, maximum: 1) &&
+                sitOutTracker.ShouldResume(true, false, now.AddSeconds(10), _ => true, maximum: 2) &&
+                sitOutTracker.Attempts == 1 && otherSitOutTracker.Attempts == 0);
 
             TableManagerSelfTest.Run(Check);
 
@@ -678,6 +722,67 @@ namespace PokerCaption
             Check("SeedFrom non riscrive [HUD]", seedBase.Get("HUD", "HudActive") == "0" && seedBase.Get("HUD", "Opacity") == "80");
             Check("SeedFrom semina sezioni assenti", seedBase.Get("GenHUD", "Count") != null && seedBase.Get("AdvancedBets", "Count") != null);
 
+            var iniBeforeStartupTest = Ini;
+            string uiTestPath = Path.Combine(Path.GetTempPath(), $"poker-caption-ui-{Guid.NewGuid():N}.ini");
+            try
+            {
+                Ini = new IniFile(uiTestPath);
+                Ini.Set("PokerCaption", "ActivePage", "Table manager");
+                using var startupUi = new MainUiController();
+                startupUi.Build(connectToClient: false);
+                var form = startupUi.Form;
+                Check("PokerCaption opens on HUD even when a legacy startup page is saved",
+                    DesktopWindow.GetWorkspace(form).SelectedPage?.Name == "HUD");
+                Check("Desktop has no manual Save settings button",
+                    form.Controls.Find("saveOptions", true).Length == 0);
+                var selector = (ComboBox)form.Controls.Find("uiLanguage", true).Single();
+                selector.SelectedIndex = 1;
+                bool italian = form.Controls.Find("workspaceNavOptions", true).Single().Text == "Opzioni" &&
+                    IniFile.Load(uiTestPath).Get("PokerCaption", "Language") == "it" &&
+                    UiLanguage.Text("Formula guide body").StartsWith("OPERATORI", StringComparison.Ordinal);
+                var rule = (CheckBox)form.Controls.Find("CheckBox327", true).Single();
+                rule.Checked = true;
+                bool savedRule = rule.Text == "Chiudi l’avviso di tavolo chiuso" &&
+                    IniFile.Load(uiTestPath).Get("AutoDialog", "Caption0") == "table is closed";
+                selector.SelectedIndex = 0;
+                Check("Language switches the desktop live and dialog rules keep their original match text",
+                    italian && savedRule && form.Controls.Find("workspaceNavOptions", true).Single().Text == "Options" &&
+                    IniFile.Load(uiTestPath).Get("PokerCaption", "Language") == "en");
+                var hudToggle = (CheckBox)form.Controls.Find("hudActive", true).Single();
+                hudToggle.Checked = false;
+                using var autosaveSymbolsDialog = new ActionsTagConfigForm(Ini, null);
+                DesktopWindow.Descendants(autosaveSymbolsDialog).OfType<CheckBox>().Single().Checked = true;
+                DesktopWindow.Descendants(autosaveSymbolsDialog).OfType<DataGridView>().Single().Rows[0].Cells["symbol"].Value = "FOLD";
+                var saved = IniFile.Load(uiTestPath);
+                Check("HUD toggles and action symbols autosave without closing either window",
+                    !saved.GetBool("HUD", "HudActive", true) && saved.GetBool("HUD", "actionsAddTimings", false) &&
+                    saved.Get("HUD", "actionsSymFold") == "FOLD");
+            }
+            finally
+            {
+                Ini = iniBeforeStartupTest;
+                UiLanguage.Use("en");
+                File.Delete(uiTestPath);
+                File.Delete(Path.ChangeExtension(uiTestPath, ".ini_bak"));
+            }
+
+            var styles = new IniFile(null);
+            styles.Set("HUD", "FormatStr0", "Test");
+            styles.Set("HUD", "FontSize0", 17);
+            styles.Set("HUD", "BackColor0", 0x030201);
+            styles.Set("HUD", "plFormatStr0", "Test");
+            styles.Set("HUD", "plFontSize0", 14);
+            styles.Set("HUD", "plBackColor0", 0x060504);
+            using (var styledHud = new HudEngine(null))
+            {
+                styledHud.Load(styles);
+                Check("Table and player HUD load independent font sizes and backgrounds",
+                    styledHud.Panels.Single(p => !p.PlayerPanel) is { FontSize: 17 } tableStyle &&
+                    tableStyle.Background == Color.FromArgb(1, 2, 3) &&
+                    styledHud.Panels.Single(p => p.PlayerPanel) is { FontSize: 14 } playerStyle &&
+                    playerStyle.Background == Color.FromArgb(4, 5, 6));
+            }
+
             using (var ui = DesktopWindow.Create())
             {
                 var pages = DesktopWindow.GetWorkspace(ui);
@@ -696,13 +801,13 @@ namespace PokerCaption
                     Navigation(name).BackColor != Navigation(name == "HUD" ? "Options" : "HUD").BackColor;
                 var layoutPanel = new Panel { Name = "layoutTestContent", Dock = DockStyle.Fill };
                 pages.Controls["Table manager"].Controls.Add(layoutPanel);
-                bool restoredLayout = IsWorkspace("Table manager", "Table layout", layoutPanel.Name);
+                bool restoredLayout = IsWorkspace("Table manager", "Table Layout", layoutPanel.Name);
                 // WinForms can change its child order independently of sidebar order.
                 pages.Controls.SetChildIndex(pages.Controls["Options"], 0);
                 Navigation("HUD").PerformClick();
                 bool hud = IsWorkspace("HUD", "HUD", "hudActive");
                 Navigation("Table manager").PerformClick();
-                bool layout = IsWorkspace("Table manager", "Table layout", layoutPanel.Name);
+                bool layout = IsWorkspace("Table manager", "Table Layout", layoutPanel.Name);
                 Navigation("Betscript").PerformClick();
                 bool bets = IsWorkspace("Betscript", "BetScript", "ListBox4");
                 Navigation("Options").PerformClick();
@@ -715,9 +820,12 @@ namespace PokerCaption
                     new[] { "tablePanelsList", "playerPanelsList", "generalHudPanelsList" }
                         .All(name => ui.Controls.Find(name, true).Single() is ListBox));
                 var tablePanels = DesktopWindow.Descendants(ui).OfType<TabPage>().Single(page => page.Text == "Table panels");
-                Check("Table HUD editor removes styling, placement and interaction controls",
-                    !DesktopWindow.Descendants(tablePanels).Any(c => c.Text is "Font" or "Background" or "Frame colour" or
-                        "Position" or "Transparent background" or "Rounded" or "Group with previous" or "Padding" or
+                Check("Table and player editors have Font and Background and remove the ordering controls",
+                    new[] { "tablePanels", "playerPanels" }.All(prefix =>
+                        new[] { "Font", "BackColor" }.All(suffix => ui.Controls.Find(prefix + suffix, true).Single() is Button) &&
+                        new[] { "MoveUp", "MoveDown", "Clone" }.All(suffix => ui.Controls.Find(prefix + suffix, true).Length == 0)) &&
+                    !DesktopWindow.Descendants(tablePanels).Any(c => c.Text is "Frame colour" or "Position" or
+                        "Transparent background" or "Rounded" or "Group with previous" or "Padding" or
                         "Frame" or "Fixed width" or "Pixels" or "Horizontal" or "Vertical" or "On click" or "On hover"));
                 Check("Desktop surface contains all persisted settings",
                     map.All(item => ui.Controls.Find(item.Control, true).Single() is CheckBox));

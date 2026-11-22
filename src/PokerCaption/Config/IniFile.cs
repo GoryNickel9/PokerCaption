@@ -136,6 +136,23 @@ namespace PokerCaption.Config
             }
         }
 
+        internal void SaveChanges(string name, Action<Section> update)
+        {
+            var section = GetOrAddSection(name);
+            var previous = section.Entries.ToArray();
+            try
+            {
+                update(section);
+                Save();
+            }
+            catch
+            {
+                section.Entries.Clear();
+                section.Entries.AddRange(previous);
+                throw;
+            }
+        }
+
         /// <summary>Salva con backup .ini_bak.</summary>
         public void Save()
         {

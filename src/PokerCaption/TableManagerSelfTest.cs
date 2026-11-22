@@ -89,26 +89,29 @@ internal static class TableManagerSelfTest
             GeometryField("Left").Value = 950;
             GeometryField("Top").Value = 30;
             GeometryField("Width").Value = 850;
+            var savedGeometry = TableManagerConfig.Load(dir, "test").InactiveSlots[0];
             manager.OnTick(tables, 1_030);
-            check("TM previews existing slot geometry without saving or changing its assignment",
-                positions[first.Hwnd] == new Rectangle(950, 30, 850, new TableManagerConfig.Slot { Width = 850 }.EffectiveHeight) && first.PlacedSlot == 0 &&
-                positions[second.Hwnd].X == 900 && TableManagerConfig.Load(dir, "test").InactiveSlots[0].Left == -200, "");
-            Click("Save and activate");
-            check("TM saves edited home geometry and preserves configured active slots",
-                manager.Config.InactiveSlots[0] is { Left: 950 } &&
+            check("TM saves geometry before applying it and keeps the current assignments",
+                savedGeometry is { Left: 950, Top: 30, Width: 850 } &&
+                positions[first.Hwnd] == new Rectangle(950, 30, 850, savedGeometry.EffectiveHeight) && first.PlacedSlot == 0 &&
+                second.InActiveSlot && positions[second.Hwnd].X == 900 &&
                 manager.Config.ActiveSlots.Select(slot => slot.Left).SequenceEqual(new[] { 900 }), "");
 
             Click("Add slot");
-            check("TM edit stays local before saving", slots.Items.Count == 2 && manager.Config.InactiveSlots.Count == 1, "");
-            Click("Save and activate");
+            check("TM immediately saves added slots", slots.Items.Count == 2 &&
+                manager.Config.InactiveSlots.Count == 2 && TableManagerConfig.Load(dir, "test").InactiveSlots.Count == 2, "");
+            Click("Up");
+            check("TM reordering slots preserves the occupied slot and saves the new order",
+                first.PlacedSlot == 1 && TableManagerConfig.Load(dir, "test").InactiveSlots[1].Left == 950, "");
             Click("Remove");
-            Click("Save and activate");
-            check("TM screen adds/removes slots and updates the profile",
-                manager.Config.InactiveSlots.Count == 1 && !IniFile.Load(original).Find("inact").TryGet("left1", out _), "");
+            check("TM immediately removes the selected slot from disk and the active profile",
+                manager.Config.InactiveSlots.Count == 1 && !IniFile.Load(original).Find("inact").TryGet("left1", out _) &&
+                !controls.Any(c => c.Text == "Save and activate"), "");
 
             profile.SelectedItem = "4x";
-            check("TM selecting a profile leaves the current layout in use", manager.ConfigName == "test", "");
-            Click("Save and activate");
+            check("TM saves and activates the selected profile immediately",
+                manager.ConfigName == "4x" && IniFile.Load(Path.Combine(work.FullName, "PokerCaption.ini"))
+                    .Get("PokerCaption", "TableManagerConfig") == "4x", "");
             enable.Checked = false;
             var saved = IniFile.Load(Path.Combine(work.FullName, "PokerCaption.ini"));
             check("TM screen persists profile selection and enable flag",

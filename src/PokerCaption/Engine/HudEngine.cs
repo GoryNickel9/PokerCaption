@@ -34,6 +34,7 @@ namespace PokerCaption.Engine
             public int Index;                     // indice INI
             public string Format;
             public Color FontColor = Color.White; // FontColor_i (testo)
+            public Color Background = Color.Empty;
             public int FontSize = 10;             // FontSize_i
             public bool PlayerPanel;
             internal readonly Dictionary<int, PointF> SeatOffsets = new();
@@ -103,6 +104,8 @@ namespace PokerCaption.Engine
                         Index = i,
                         Format = f,
                         FontColor = IniColors.FromInt(ini.GetLong("HUD", "FontColor" + i, 0xFFFFFF)),
+                        FontSize = ini.GetInt("HUD", "FontSize" + i, 10),
+                        Background = ReadBackground(ini, "BackColor" + i),
                         PlayerPanel = false,
                         Visible = ini.GetBool("HUD", "FVisible" + i, true)
                     });
@@ -118,6 +121,7 @@ namespace PokerCaption.Engine
                         Format = pf,
                         FontColor = IniColors.FromInt(ini.GetLong("HUD", "plFontColor" + i, 0xFFFFFF)),
                         FontSize = ini.GetInt("HUD", "plFontSize" + i, 10),
+                        Background = ReadBackground(ini, "plBackColor" + i),
                         PlayerPanel = true,
                         Visible = ini.GetBool("HUD", "plFVisible" + i, true)
                     };
@@ -135,6 +139,9 @@ namespace PokerCaption.Engine
             if (previousTablePanelCount != Panels.Count(p => !p.PlayerPanel))
                 foreach (var hwnd in _perTable.Keys.ToList()) DestroyTablePanels(hwnd);
         }
+
+        private static Color ReadBackground(IniFile ini, string key) =>
+            ini.Get("HUD", key) == null ? Color.Empty : IniColors.FromInt(ini.GetLong("HUD", key, 0x404040));
 
         internal void FollowTables(IReadOnlyList<TableInfo> tables)
         {
@@ -197,7 +204,7 @@ namespace PokerCaption.Engine
                     var panel = panels[idx++];
                     string text = def.Visible && tableVisible && HudTags.Visible(def.Format, ctx) ? HudTags.Resolve(def.Format, ctx) : "";
                     if (string.IsNullOrWhiteSpace(text)) { panel.Visible = false; continue; }
-                    panel.SetRuns([(text, def.FontColor, Color.Empty, def.FontSize, true)], Padding.Empty);
+                    panel.SetRuns([(text, def.FontColor, def.Background, def.FontSize, true)], Padding.Empty);
                     panel.MoveTo(new Rectangle(center - panel.Width / 2, y, panel.Width, panel.Height));
                     panel.ShowOwned();
                     y += panel.Height + 2;
@@ -249,7 +256,7 @@ namespace PokerCaption.Engine
                         }
                         panel.SetRuns(new List<(string, Color, Color, int, bool)>
                         {
-                            (text, def.FontColor, Color.Empty, def.FontSize, true)
+                            (text, def.FontColor, def.Background, def.FontSize, true)
                         }, Padding.Empty);
                         int left = Math.Clamp(anchor.Left + anchor.Width / 2 - PlayerPanelStartInset,
                             0, Math.Max(0, client.Right - PlayerPanelStartInset * 3));

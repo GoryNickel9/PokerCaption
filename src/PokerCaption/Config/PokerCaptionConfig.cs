@@ -36,7 +36,10 @@ namespace PokerCaption.Config
                 entry.Key.Equals("AutoHideChat", StringComparison.OrdinalIgnoreCase) ||
                 entry.Key.Equals("BetscriptOn", StringComparison.OrdinalIgnoreCase) ||
                 entry.Key.Equals("CloseCantFound", StringComparison.OrdinalIgnoreCase) ||
-                entry.Key.Equals("CNFafter", StringComparison.OrdinalIgnoreCase));
+                entry.Key.Equals("CNFafter", StringComparison.OrdinalIgnoreCase) ||
+                entry.Key.Equals("CloseTableHasConcluded", StringComparison.OrdinalIgnoreCase) ||
+                entry.Key.Equals("CloseTournamentIsOver", StringComparison.OrdinalIgnoreCase) ||
+                entry.Key.Equals("CloseTrnyLobby", StringComparison.OrdinalIgnoreCase));
 
         internal static void MigrateHudFormats(IniFile ini)
         {

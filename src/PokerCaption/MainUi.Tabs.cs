@@ -29,22 +29,16 @@ namespace PokerCaption
         // (apply iniziale / load backup) gli eventi di cambio devono restare inerti
         private bool _tabsSync;
 
-        private static readonly string[] UnavailableOptions =
-        {
-            "neverSitOut", "CheckBox279", "Edit236", "UpDown165",
-        };
-
         private sealed record DialogRule(CheckBox Box, string Caption);
         private readonly List<DialogRule> _dialogRules = new List<DialogRule>();
 
         private static readonly (string Control, string Key, bool Default)[] OptionsFlags =
         {
             ("CheckBox34", "MinimizeToTray", true),
+            ("neverSitOut", "NeverSitOut", false),
+            ("neverSitOutLimit", "NeverSitOutLimit", false),
             ("CheckBox344", "CaptionAutoClose", false),
             ("CheckBox173", "CloseTableHasBeenClosed", false),
-            ("CheckBox401", "CloseTableHasConcluded", false),
-            ("CheckBox504", "CloseTournamentIsOver", false),
-            ("CheckBox283", "CloseTrnyLobby", false),
             ("CheckBox316", "CurSessInfo", false),
             ("CheckBox208", "KeepPlaying", false),
             ("CheckBox50", "InactivityTO", false),
@@ -62,30 +56,43 @@ namespace PokerCaption
         {
             var page = WorkspacePageByName(f, "Options") ?? f;
 
-            foreach (var name in UnavailableOptions)
-                if (Ctl(page, name) is Control unavailable)
-                {
-                    unavailable.Enabled = false;
-                    unavailable.AccessibleDescription = "Unavailable in this build.";
-                }
-
             // Applica le opzioni salvate prima di collegare gli eventi.
             SyncOptionsFromIni(page);
 
             foreach (var (name, key, _) in OptionsFlags)
             {
                 if (Ctl(page, name) is not CheckBox cb) continue;
-                cb.CheckedChanged += (s, e) =>
+                WireSavedToggle(cb, "PokerCaption", key, () =>
                 {
-                    if (_tabsSync) return;
-                    Program.Ini.Set("PokerCaption", key, cb.Checked ? "1" : "0");
-                    if (key == "MinimizeToTray") ApplyTrayOption(cb.Checked);
-                    if (key == "CloseTrnyLobby") Program.Service?.SetCloseTournamentLobby(cb.Checked);
+                    if (key is "NeverSitOut" or "NeverSitOutLimit")
+                    {
+                        RefreshSitOutLimits(page);
+                        Program.Service?.SetNeverSitOut(Program.Ini);
+                    }
+                    else if (key == "MinimizeToTray") ApplyTrayOption(cb.Checked);
                     else if (key is not ("MinimizeToTray" or "CaptionAutoClose"))
                         Program.Service?.AutoDialog.Load(Program.Ini);
                     Log("Options: " + key + " = " + (cb.Checked ? "1" : "0"));
-                };
+                });
             }
+
+            var maximum = (NumericUpDown)Ctl(page, "neverSitOutMaximum");
+            maximum.ValueChanged += (_, _) =>
+            {
+                if (_tabsSync) return;
+                try
+                {
+                    Program.Ini.SaveChanges("PokerCaption", section =>
+                        section["NeverSitOutMaximum"] = maximum.Value.ToString(CultureInfo.InvariantCulture));
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    SyncOptionsFromIni(page);
+                    MessageBox.Show(f, ex.Message, "PokerCaption", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+                Program.Service?.SetNeverSitOut(Program.Ini);
+            };
 
             f.Resize += (s, e) =>
             {
@@ -94,6 +101,40 @@ namespace PokerCaption
                     HideToTray(f);
             };
 
+        }
+
+        private void WireLanguage(Form form)
+        {
+            var selector = (ComboBox)Ctl(form, "uiLanguage");
+            bool restoring = false;
+            selector.SelectedIndex = UiLanguage.IsItalian ? 1 : 0;
+            selector.SelectedIndexChanged += (_, _) =>
+            {
+                if (restoring || selector.SelectedIndex < 0) return;
+                string language = selector.SelectedIndex == 1 ? "it" : "en";
+                try { Program.Ini.SaveChanges("PokerCaption", section => section["Language"] = language); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    restoring = true;
+                    try { selector.SelectedIndex = UiLanguage.IsItalian ? 1 : 0; }
+                    finally { restoring = false; }
+                    MessageBox.Show(form, ex.Message, "PokerCaption", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+                UiLanguage.Use(language);
+                RefreshLanguage(form);
+            };
+        }
+
+        private static void RefreshLanguage(Form form)
+        {
+            UiLanguage.Apply(form);
+            var pages = DesktopWindow.GetWorkspace(form);
+            var link = Ctl(form, "workspaceNav" + pages.SelectedPage.Name);
+            Ctl(form, "workspaceHeading").Text = link.Text;
+            if (Ctl(form, "sessionStatus") is Label status && status.Text is "Offline preview" or "Anteprima offline")
+                status.Text = UiLanguage.Text("Offline preview");
+            DesktopWindow.Descendants(form).OfType<TableManagerPanel>().FirstOrDefault()?.RefreshLanguage();
         }
 
         private static bool IsCaptionClient(string path)
@@ -190,8 +231,20 @@ namespace PokerCaption
             {
                 foreach (var (name, key, fallback) in OptionsFlags)
                     SetChecked(page, name, Program.Ini.GetBool("PokerCaption", key, fallback));
+                if (Ctl(page, "neverSitOutMaximum") is NumericUpDown maximum)
+                    maximum.Value = Math.Clamp(Program.Ini.GetInt("PokerCaption", "NeverSitOutMaximum", 3), 1, 999);
             }
             finally { _tabsSync = syncing; }
+            RefreshSitOutLimits(page);
+        }
+
+        private static void RefreshSitOutLimits(Control page)
+        {
+            var never = (CheckBox)Ctl(page, "neverSitOut");
+            var limit = (CheckBox)Ctl(page, "neverSitOutLimit");
+            var maximum = (NumericUpDown)Ctl(page, "neverSitOutMaximum");
+            limit.Enabled = never.Checked;
+            maximum.Enabled = never.Checked && limit.Checked;
         }
 
         // ============================================================ DIALOGS
@@ -201,7 +254,6 @@ namespace PokerCaption
             var captionPattern = new Regex("^Close\\s+'(.+?)'", RegexOptions.Singleline);
             foreach (var box in DesktopWindow.Descendants(page).OfType<CheckBox>())
             {
-                if (UnavailableOptions.Contains(box.Name)) continue;
                 var match = captionPattern.Match(box.Text.Trim());
                 if (!match.Success) continue;
 
@@ -209,7 +261,15 @@ namespace PokerCaption
                 _dialogRules.Add(rule);
                 box.CheckedChanged += (_, _) =>
                 {
-                    if (!_tabsSync) UpdateDialogRule(rule);
+                    if (_tabsSync) return;
+                    try { UpdateDialogRule(rule); }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        _tabsSync = true;
+                        try { box.Checked = !box.Checked; }
+                        finally { _tabsSync = false; }
+                        MessageBox.Show(f, ex.Message, "PokerCaption", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
                 };
             }
 
@@ -275,14 +335,16 @@ namespace PokerCaption
 
         private static void WriteDialogRules(List<(string Caption, int Delay)> rules)
         {
-            var section = Program.Ini.GetOrAddSection("AutoDialog");
-            section.Entries.RemoveAll(entry => Regex.IsMatch(entry.Key, "^(?:Caption|Delay)[0-9]+$", RegexOptions.IgnoreCase));
-            for (int i = 0; i < rules.Count; i++)
+            Program.Ini.SaveChanges("AutoDialog", section =>
             {
-                section["Caption" + i] = rules[i].Caption;
-                section["Delay" + i] = rules[i].Delay.ToString(CultureInfo.InvariantCulture);
-            }
-            section["Count"] = rules.Count.ToString(CultureInfo.InvariantCulture);
+                section.Entries.RemoveAll(entry => Regex.IsMatch(entry.Key, "^(?:Caption|Delay)[0-9]+$", RegexOptions.IgnoreCase));
+                for (int i = 0; i < rules.Count; i++)
+                {
+                    section["Caption" + i] = rules[i].Caption;
+                    section["Delay" + i] = rules[i].Delay.ToString(CultureInfo.InvariantCulture);
+                }
+                section["Count"] = rules.Count.ToString(CultureInfo.InvariantCulture);
+            });
             Program.Service?.AutoDialog.Load(Program.Ini);
         }
 

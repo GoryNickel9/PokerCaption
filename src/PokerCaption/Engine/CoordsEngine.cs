@@ -119,12 +119,22 @@ namespace PokerCaption.Engine
             return true;
         }
 
-        private static bool FocusBetBox(IntPtr hwnd, double nx, double ny)
+        private static bool FocusBetBox(IntPtr hwnd, double nx, double ny) =>
+            TryPoint(hwnd, nx, ny, out var point, foregroundOnly: true) && ClickForegroundAt(hwnd, point);
+
+        internal static bool ClickForegroundClientPoint(IntPtr hwnd, Point clientPoint)
         {
-            if (!TryPoint(hwnd, nx, ny, out var point, foregroundOnly: true) ||
+            var point = new NativeMethods.POINT { X = clientPoint.X, Y = clientPoint.Y };
+            return NativeMethods.GetClientRect(hwnd, out var client) &&
+                point.X > 0 && point.X < client.Right && point.Y > 0 && point.Y < client.Bottom &&
+                NativeMethods.ClientToScreen(hwnd, ref point) && ClickForegroundAt(hwnd, point);
+        }
+
+        private static bool ClickForegroundAt(IntPtr hwnd, NativeMethods.POINT point)
+        {
+            if (NativeMethods.GetForegroundWindow() != hwnd || !OwnsPoint(hwnd, point) ||
                 !NativeMethods.GetCursorPos(out var original) || !OwnsPoint(hwnd, original) ||
-                NativeMethods.GetForegroundWindow() != hwnd || NativeMethods.IsInMoveSize(hwnd))
-                return false;
+                NativeMethods.IsInMoveSize(hwnd)) return false;
 
             // Queue focus and restoration together. A physical input event cannot enter the batch.
             var screen = SystemInformation.VirtualScreen;

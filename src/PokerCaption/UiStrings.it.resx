@@ -1,0 +1,330 @@
+<?xml version='1.0' encoding='utf-8'?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <data name="Table Layout" xml:space="preserve">
+    <value>Disposizione tavoli</value>
+  </data>
+  <data name="Options" xml:space="preserve">
+    <value>Opzioni</value>
+  </data>
+  <data name="Language" xml:space="preserve">
+    <value>Lingua</value>
+  </data>
+  <data name="Waiting for client" xml:space="preserve">
+    <value>In attesa del client</value>
+  </data>
+  <data name="Offline preview" xml:space="preserve">
+    <value>Anteprima offline</value>
+  </data>
+  <data name="Table HUD" xml:space="preserve">
+    <value>HUD del tavolo</value>
+  </data>
+  <data name="General HUD" xml:space="preserve">
+    <value>HUD generale</value>
+  </data>
+  <data name="Lock HUD" xml:space="preserve">
+    <value>Blocca HUD</value>
+  </data>
+  <data name="Lock General HUD" xml:space="preserve">
+    <value>Blocca HUD generale</value>
+  </data>
+  <data name="Table panels" xml:space="preserve">
+    <value>Pannelli tavolo</value>
+  </data>
+  <data name="Player panels" xml:space="preserve">
+    <value>Pannelli giocatori</value>
+  </data>
+  <data name="Action symbols" xml:space="preserve">
+    <value>Simboli delle azioni</value>
+  </data>
+  <data name="[actions] tag config" xml:space="preserve">
+    <value>Configurazione di [actions]</value>
+  </data>
+  <data name="Action" xml:space="preserve">
+    <value>Azione</value>
+  </data>
+  <data name="Symbol" xml:space="preserve">
+    <value>Simbolo</value>
+  </data>
+  <data name="Timings" xml:space="preserve">
+    <value>Tempi</value>
+  </data>
+  <data name="Add timings" xml:space="preserve">
+    <value>Mostra i tempi</value>
+  </data>
+  <data name="Add" xml:space="preserve">
+    <value>Aggiungi</value>
+  </data>
+  <data name="Delete" xml:space="preserve">
+    <value>Elimina</value>
+  </data>
+  <data name="Up" xml:space="preserve">
+    <value>Su</value>
+  </data>
+  <data name="Down" xml:space="preserve">
+    <value>Giù</value>
+  </data>
+  <data name="Format" xml:space="preserve">
+    <value>Formato</value>
+  </data>
+  <data name="Insert tag" xml:space="preserve">
+    <value>Inserisci tag</value>
+  </data>
+  <data name="Visible" xml:space="preserve">
+    <value>Visibile</value>
+  </data>
+  <data name="Text colour" xml:space="preserve">
+    <value>Colore del testo</value>
+  </data>
+  <data name="Font" xml:space="preserve">
+    <value>Carattere</value>
+  </data>
+  <data name="Background" xml:space="preserve">
+    <value>Sfondo</value>
+  </data>
+  <data name="Add rule" xml:space="preserve">
+    <value>Aggiungi regola</value>
+  </data>
+  <data name="Duplicate" xml:space="preserve">
+    <value>Duplica</value>
+  </data>
+  <data name="Rule settings" xml:space="preserve">
+    <value>Impostazioni regola</value>
+  </data>
+  <data name="Formula" xml:space="preserve">
+    <value>Formula</value>
+  </data>
+  <data name="Streets" xml:space="preserve">
+    <value>Fasi della mano</value>
+  </data>
+  <data name="Preflop" xml:space="preserve">
+    <value>Preflop</value>
+  </data>
+  <data name="Flop" xml:space="preserve">
+    <value>Flop</value>
+  </data>
+  <data name="Turn" xml:space="preserve">
+    <value>Turn</value>
+  </data>
+  <data name="River" xml:space="preserve">
+    <value>River</value>
+  </data>
+  <data name="Application" xml:space="preserve">
+    <value>Applicazione</value>
+  </data>
+  <data name="Minimize to tray" xml:space="preserve">
+    <value>Riduci nell’area di notifica</value>
+  </data>
+  <data name="Close PokerCaption after the client closes" xml:space="preserve">
+    <value>Chiudi PokerCaption all’uscita dall’ultimo client</value>
+  </data>
+  <data name="Table preferences" xml:space="preserve">
+    <value>Preferenze tavoli</value>
+  </data>
+  <data name="Never sit out" xml:space="preserve">
+    <value>Evita il sit-out</value>
+  </data>
+  <data name="Maximum" xml:space="preserve">
+    <value>Massimo</value>
+  </data>
+  <data name="Table closure" xml:space="preserve">
+    <value>Chiusura tavoli</value>
+  </data>
+  <data name="Auto close 'This table has been closed' tables" xml:space="preserve">
+    <value>Chiudi i tavoli già dichiarati chiusi</value>
+  </data>
+  <data name="Close 'table is closed'" xml:space="preserve">
+    <value>Chiudi l’avviso di tavolo chiuso</value>
+  </data>
+  <data name="Close Current Session Information" xml:space="preserve">
+    <value>Chiudi le informazioni sulla sessione</value>
+  </data>
+  <data name="Keep playing in Current Session" xml:space="preserve">
+    <value>Continua la sessione corrente</value>
+  </data>
+  <data name="Stay connected on inactivity timeout" xml:space="preserve">
+    <value>Mantieni la connessione in caso di inattività</value>
+  </data>
+  <data name="Dialogs" xml:space="preserve">
+    <value>Avvisi</value>
+  </data>
+  <data name="Enable Table Manager" xml:space="preserve">
+    <value>Attiva disposizione tavoli</value>
+  </data>
+  <data name="Layout" xml:space="preserve">
+    <value>Profilo</value>
+  </data>
+  <data name="New" xml:space="preserve">
+    <value>Nuovo</value>
+  </data>
+  <data name="Slots" xml:space="preserve">
+    <value>Slot</value>
+  </data>
+  <data name="Add slot" xml:space="preserve">
+    <value>Aggiungi slot</value>
+  </data>
+  <data name="Slot geometry" xml:space="preserve">
+    <value>Posizione e larghezza</value>
+  </data>
+  <data name="Left" xml:space="preserve">
+    <value>Sinistra</value>
+  </data>
+  <data name="Top" xml:space="preserve">
+    <value>Alto</value>
+  </data>
+  <data name="Width" xml:space="preserve">
+    <value>Larghezza</value>
+  </data>
+  <data name="Remove" xml:space="preserve">
+    <value>Rimuovi</value>
+  </data>
+  <data name="No layout selected for use" xml:space="preserve">
+    <value>Nessun profilo attivo</value>
+  </data>
+  <data name="Current layout: {0}" xml:space="preserve">
+    <value>Profilo attivo: {0}</value>
+  </data>
+  <data name=" (manager off)" xml:space="preserve">
+    <value> (disattivato)</value>
+  </data>
+  <data name="New layout" xml:space="preserve">
+    <value>Nuovo profilo</value>
+  </data>
+  <data name="Duplicate layout" xml:space="preserve">
+    <value>Duplica profilo</value>
+  </data>
+  <data name="Layout name" xml:space="preserve">
+    <value>Nome del profilo</value>
+  </data>
+  <data name="Delete layout" xml:space="preserve">
+    <value>Elimina profilo</value>
+  </data>
+  <data name="Delete layout “{0}”?" xml:space="preserve">
+    <value>Eliminare il profilo «{0}»?</value>
+  </data>
+  <data name="Create" xml:space="preserve">
+    <value>Crea</value>
+  </data>
+  <data name="Cancel" xml:space="preserve">
+    <value>Annulla</value>
+  </data>
+  <data name="Close" xml:space="preserve">
+    <value>Chiudi</value>
+  </data>
+  <data name="BetScript formula guide" xml:space="preserve">
+    <value>Guida alle formule BetScript</value>
+  </data>
+  <data name="Panel format" xml:space="preserve">
+    <value>Formato pannello</value>
+  </data>
+  <data name="Bet formula" xml:space="preserve">
+    <value>Formula della puntata</value>
+  </data>
+  <data name="Rules in priority order" xml:space="preserve">
+    <value>Regole in ordine di priorità</value>
+  </data>
+  <data name="Streets for this rule" xml:space="preserve">
+    <value>Fasi di applicazione</value>
+  </data>
+  <data name="BetScript formula help" xml:space="preserve">
+    <value>Guida alle formule BetScript</value>
+  </data>
+  <data name="Fold" xml:space="preserve">
+    <value>Fold</value>
+  </data>
+  <data name="Check" xml:space="preserve">
+    <value>Check</value>
+  </data>
+  <data name="1st limp" xml:space="preserve">
+    <value>Primo limp</value>
+  </data>
+  <data name="Overlimp" xml:space="preserve">
+    <value>Overlimp</value>
+  </data>
+  <data name="Call" xml:space="preserve">
+    <value>Call</value>
+  </data>
+  <data name="Overcall" xml:space="preserve">
+    <value>Overcall</value>
+  </data>
+  <data name="Call 3+ bet" xml:space="preserve">
+    <value>Call su 3-bet o superiore</value>
+  </data>
+  <data name="Bet" xml:space="preserve">
+    <value>Bet</value>
+  </data>
+  <data name="Donk" xml:space="preserve">
+    <value>Donk bet</value>
+  </data>
+  <data name="Open raise" xml:space="preserve">
+    <value>Rilancio di apertura</value>
+  </data>
+  <data name="Raise" xml:space="preserve">
+    <value>Rilancio</value>
+  </data>
+  <data name="3+ bet" xml:space="preserve">
+    <value>3-bet o superiore</value>
+  </data>
+  <data name="Post dead" xml:space="preserve">
+    <value>Buio morto</value>
+  </data>
+  <data name="Street divider" xml:space="preserve">
+    <value>Separatore di fase</value>
+  </data>
+  <data name="Isolate" xml:space="preserve">
+    <value>Isolamento</value>
+  </data>
+  <data name="Show" xml:space="preserve"><value>Mostra</value></data>
+  <data name="Exit" xml:space="preserve"><value>Esci</value></data>
+  <data name="Saved" xml:space="preserve"><value>Salvato</value></data>
+  <data name="OPERATORS" xml:space="preserve"><value>OPERATORI</value></data>
+  <data name="TABLE VALUES" xml:space="preserve"><value>VALORI DEL TAVOLO</value></data>
+  <data name="EXAMPLES" xml:space="preserve"><value>ESEMPI</value></data>
+  <data name="DISPLAY" xml:space="preserve"><value>VISUALIZZAZIONE</value></data>
+  <data name="Formula guide body" xml:space="preserve"><value>OPERATORI
+Usa ^ per le potenze, * e / per moltiplicare e dividere, + e - per sommare e sottrarre.
+Raggruppa i termini con le parentesi. Aggiungi bb a un numero per esprimerlo in grandi bui.
+Puoi usare 0.5 o 0,5. I nomi delle variabili accettano maiuscole e minuscole.
+
+VALORI DEL TAVOLO
+pot         Piatto totale, incluse le puntate correnti
+spot        Piatto all’inizio della fase
+ante        Ante per giocatore
+antes       Somma degli ante
+bet         Puntata da pareggiare, prima di sottrarre il tuo contributo
+raise       Ultima puntata o rilancio
+hbet        Il tuo contributo in questa fase, inclusi i bui
+call        Importo necessario per chiamare
+stack       Il tuo stack rimanente
+effStack    Stack effettivo
+betbox      Importo attualmente nel campo puntata
+sb / bb     Piccolo buio / grande buio
+
+ESEMPI
+3.5bb vale 3,5 grandi bui.
+pot * 0.5 vale metà del piatto corrente. Funziona anche pot x 0.5.
+raise * 3 triplica l’ultima puntata o rilancio.
+pot + 1bb - antes può servire per un rilancio di apertura.
+effStack / 3 usa un terzo dello stack effettivo.
+x1 calcola una puntata o un rilancio della dimensione del piatto, tenendo conto del call.
+x1 + 1bb aggiunge un grande buio a quell’importo.
+x(1 / 2) calcola una puntata di metà piatto con lo stesso criterio.
+
+VISUALIZZAZIONE
+Aggiungi da @0 a @15 per impostare le cifre decimali. Il valore predefinito è 2.
+Aggiungi @H per lasciare invariato il campo puntata, per esempio pot@H.
+
+Alcuni valori dipendono dal client. Se manca un valore richiesto, BetScript prova la regola successiva.</value></data>
+  <data name="Configuration — PokerCaption.ini" xml:space="preserve"><value>Configurazione — PokerCaption.ini</value></data>
+  <data name="Search key or section…" xml:space="preserve"><value>Cerca chiave o sezione…</value></data>
+  <data name="Reload" xml:space="preserve"><value>Ricarica</value></data>
+  <data name="Key" xml:space="preserve"><value>Chiave</value></data>
+  <data name="Value" xml:space="preserve"><value>Valore</value></data>
+  <data name=" (reloaded)" xml:space="preserve"><value> (ricaricato)</value></data>
+  <data name="{0} keys" xml:space="preserve"><value>{0} chiavi</value></data>
+</root>

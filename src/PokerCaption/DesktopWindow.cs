@@ -27,21 +27,16 @@ internal static class DesktopWindow
         var nav = new TableLayoutPanel
         {
             Dock = DockStyle.Fill, BackColor = Rail, Padding = new Padding(16, 22, 16, 18),
-            Margin = Padding.Empty, ColumnCount = 1, RowCount = 3
+            Margin = Padding.Empty, ColumnCount = 1, RowCount = 2
         };
         nav.RowStyles.Add(new RowStyle(SizeType.Absolute, 62));
         nav.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        nav.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         var logo = Heading("PokerCaption", 17, Color.White);
         nav.Controls.Add(logo, 0, 0);
         var links = Stack();
         links.Dock = DockStyle.Fill;
         links.WrapContents = false;
         nav.Controls.Add(links, 0, 1);
-        var save = Button("saveOptions", "Save settings", primary: true);
-        save.Dock = DockStyle.Fill;
-        save.Margin = Padding.Empty;
-        nav.Controls.Add(save, 0, 2);
         shell.Controls.Add(nav, 0, 0);
 
         var work = new TableLayoutPanel
@@ -68,8 +63,8 @@ internal static class DesktopWindow
         var pagesAndLabels = new (Panel page, string label)[]
         {
             (HudPage(), "HUD"),
-            (WorkspacePage("Table manager"), "Table layout"),
             (BetsPage(), "BetScript"),
+            (WorkspacePage("Table manager"), "Table Layout"),
             (OptionsPage(), "Options")
         };
         var navButtons = new List<Button>();
@@ -97,7 +92,7 @@ internal static class DesktopWindow
             {
                 bool selected = pagesAndLabels[i].page == pages.SelectedPage;
                 navButtons[i].BackColor = selected ? Selected : Rail;
-                if (selected) title.Text = pagesAndLabels[i].label;
+                if (selected) title.Text = UiLanguage.Text(pagesAndLabels[i].label);
             }
         }
         pages.PageChanged += (_, _) => SyncNavigation();
@@ -135,11 +130,12 @@ internal static class DesktopWindow
         var list = new ListBox { Name = isGeneral ? "generalHudPanelsList" : prefix + "List", Dock = DockStyle.Fill, IntegralHeight = false,
             AccessibleName = title, Margin = new Padding(0, 8, 0, 8) };
         listSide.Controls.Add(list, 0, 1);
-        var order = Row(Button(prefix + "MoveUp", "Up"), Button(prefix + "MoveDown", "Down"));
-        if (!isGeneral) order.Controls.Add(Button(prefix + "Clone", "Duplicate"));
-        listSide.RowCount = 3;
-        listSide.RowStyles.Insert(2, new RowStyle(SizeType.AutoSize));
-        listSide.Controls.Add(order, 0, 2);
+        if (isGeneral)
+        {
+            listSide.RowCount = 3;
+            listSide.RowStyles.Insert(2, new RowStyle(SizeType.AutoSize));
+            listSide.Controls.Add(Row(Button(prefix + "MoveUp", "Up"), Button(prefix + "MoveDown", "Down")), 0, 2);
+        }
         split.Controls.Add(listSide, 0, 0);
 
         var inspector = Editor(out var fields);
@@ -152,10 +148,7 @@ internal static class DesktopWindow
         if (!isGeneral) formatActions.Controls.Add(Check(prefix + "Visible", "Visible", true));
         formatActions.Controls.Add(Button(prefix + "FontColor", "Text colour"));
         fields.Controls.Add(formatActions);
-        if (isGeneral)
-        {
-            fields.Controls.Add(Row(Button("generalHudFont", "Font"), Button("generalHudBackColor", "Background")));
-        }
+        fields.Controls.Add(Row(Button(prefix + "Font", "Font"), Button(prefix + "BackColor", "Background")));
         return page;
     }
 
@@ -204,18 +197,16 @@ internal static class DesktopWindow
             Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, Padding = new Padding(2, 0, 12, 12)
         };
         scroll.Controls.Add(contents);
-        contents.Controls.Add(Section("Application", Check("CheckBox34", "Minimize to tray", true),
-            Check("CheckBox344", "Close PokerCaption after the last client closes")));
-        var max = Check("CheckBox279", "Maximum");
-        var maximum = Field("Edit236", "Maximum", 50);
-        maximum.Text = "3";
-        contents.Controls.Add(Section("Table preferences",
-            Check("neverSitOut", "Never sit out"), Row(max, maximum,
-                Spin("UpDown165", "Maximum", 1, 999, 3))));
-        contents.Controls.Add(Section("Table closure", Check("CheckBox173", "Auto close 'This table has been closed' tables"),
-            Check("CheckBox401", "Auto close 'Play at this table has concluded' tables"),
-            Check("CheckBox504", "Auto close 'Tournament is over' tables"),
-            Check("CheckBox283", "Close tournament lobby when its last table closes")));
+        var language = new ComboBox
+        {
+            Name = "uiLanguage", AccessibleName = "Language", DropDownStyle = ComboBoxStyle.DropDownList, Width = 145
+        };
+        language.Items.AddRange(["English", "Italiano"]);
+        contents.Controls.Add(Section("Application", Labeled("Language", language), Check("CheckBox34", "Minimize to tray", true),
+            Check("CheckBox344", "Close PokerCaption after the client closes")));
+        contents.Controls.Add(Section("Table preferences", Check("neverSitOut", "Never sit out"),
+            Row(Check("neverSitOutLimit", "Maximum"), Spin("neverSitOutMaximum", "Maximum", 1, 999, 3))));
+        contents.Controls.Add(Section("Table closure", Check("CheckBox173", "Auto close 'This table has been closed' tables")));
 
         var dialogItems = DialogRules.Select(rule => Check(rule.name, $"Close '{rule.caption}'")).ToList();
         foreach (var (name, caption) in new[]
