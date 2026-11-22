@@ -1,0 +1,17 @@
+**/bin/
+**/obj/
+**/out/
+**/.zig-cache/
+**/.vs/
+**/__pycache__/
+/assets/
+/mockup/Desktop/
+/mockup/*.png
+*.exe
+*.dll
+*.pdb
+*.tpf
+*.ini
+*.ini_bak
+*.log
+global_stats

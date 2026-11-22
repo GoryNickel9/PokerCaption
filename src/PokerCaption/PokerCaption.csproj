@@ -1,0 +1,38 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Processo x86 per compatibilità con i client a 32 bit -->
+    <PlatformTarget>x86</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <AssemblyName>PokerCaption</AssemblyName>
+    <Product>PokerCaption</Product>
+    <RootNamespace>PokerCaption</RootNamespace>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(PokerCaptionMockup)' == 'true'">
+    <AssemblyName>PokerCaption.Mockup</AssemblyName>
+    <DefineConstants>$(DefineConstants);NATIVE_UI_MOCKUP</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(PokerCaptionMockup)' == 'true'">
+    <Compile Include="..\..\mockup\NativeMockup.cs" Link="NativeMockup.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- DLL native incluse nell'output (x86 per client 32-bit, x64 per 64-bit) -->
+    <None Include="..\..\native\bin\x86\captionHook.dll" CopyToOutputDirectory="PreserveNewest" Link="native\x86\captionHook.dll" />
+    <None Include="..\..\native\bin\x64\captionHook.dll" CopyToOutputDirectory="PreserveNewest" Link="native\x64\captionHook.dll" />
+    <None Include="..\..\native\third_party\minhook\LICENSE.txt" CopyToOutputDirectory="PreserveNewest" Link="native\MinHook-LICENSE.txt" />
+    <!-- profilo skin + dump UIA (nick pre-tavolo) -->
+    <None Include="..\..\tools\dump_uia.ps1" CopyToOutputDirectory="PreserveNewest" Link="tools\dump_uia.ps1" />
+  </ItemGroup>
+
+</Project>

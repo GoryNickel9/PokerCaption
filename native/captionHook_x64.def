@@ -1,0 +1,11 @@
+LIBRARY captionHook
+EXPORTS
+    hookProc
+    hookGetMsgProc
+    hookAttachShared
+    hookCalls
+    hookDispatches
+    hookSharedOk
+    hookLastMsg
+    hookMsgCalls
+    hookReplies
