@@ -10,7 +10,6 @@ public sealed class TableManagerEngine
     private readonly Func<IntPtr, Rectangle, bool> _place;
     private readonly Dictionary<int, Rectangle> _geometryPreview = new();
     private readonly Dictionary<TableInfo, Placement> _placements = new();
-    private long _nextSort;
     private const int MoveRetryMs = 1000;
     private volatile bool _enabled;
 
@@ -21,7 +20,9 @@ public sealed class TableManagerEngine
         public bool OpenedActive;
         public Rectangle? Bounds;
         public long NextMove;
-        public double LastBlind;
+        public bool Detached;
+        public Rectangle? DragOrigin;
+        public Rectangle? SettledBounds;
     }
 
     public string ConfigName { get; private set; } = "4x";
@@ -47,6 +48,10 @@ public sealed class TableManagerEngine
 
     internal void ClearGeometryPreview(int slot) => _geometryPreview.Remove(slot);
 
+    internal bool IsMoving(TableInfo table) => Enabled && _placements.TryGetValue(table, out var state) &&
+        (state.DragOrigin.HasValue || (state.Bounds.HasValue && state.SettledBounds == null &&
+            Environment.TickCount64 < state.NextMove));
+
     public void Load(IniFile ini)
     {
         bool wasLayoutOnly = LayoutOnly;
@@ -56,7 +61,6 @@ public sealed class TableManagerEngine
         ClearGeometryPreview();
         foreach (var table in _placements.Keys) ClearSlot(table);
         _placements.Clear();
-        _nextSort = 0;
         try
         {
             if (!string.IsNullOrEmpty(ConfigDir) && File.Exists(TableManagerConfig.ProfilePath(ConfigDir, ConfigName)))
@@ -75,32 +79,11 @@ public sealed class TableManagerEngine
         var closedTables = _placements.Keys.Where(t => !tables.Contains(t)).ToArray();
         foreach (var closed in closedTables)
             _placements.Remove(closed);
-        bool sortInputsChanged = closedTables.Length > 0;
-
-        var candidates = tables;
         foreach (var table in tables)
         {
             if (!_placements.TryGetValue(table, out var state))
-            {
-                state = new Placement { OpenedActive = true, LastBlind = table.Bb };
-                _placements.Add(table, state);
-                sortInputsChanged = true;
-            }
-            else if (!state.LastBlind.Equals(table.Bb))
-            {
-                state.LastBlind = table.Bb;
-                sortInputsChanged = true;
-            }
-        }
-
-        if (sortInputsChanged)
-            _nextSort = now + TableManagerConfig.AutoSortDelayMs;
-        bool sort = _nextSort != 0 && now >= _nextSort;
-        if (sort)
-        {
-            _nextSort = 0;
-            candidates = candidates.OrderByDescending(table => table.Bb)
-                .ThenBy(table => table.Title, StringComparer.OrdinalIgnoreCase).ToList();
+                _placements.Add(table, state = new Placement { OpenedActive = true });
+            if (_place == null && !table.Locked) TrackDrop(table, state);
         }
 
         var homeSlots = Config.InactiveSlots;
@@ -108,64 +91,61 @@ public sealed class TableManagerEngine
         var homes = new int[homeSlots.Count];
         var active = new int[activeSlots.Count];
 
-        // Keep each table's home slot while it is active, so binding and return are stable.
-        foreach (var table in candidates)
+        // Keep each table's home slot while it is active so it can return to it.
+        foreach (var table in tables)
         {
             var state = _placements[table];
-            if (sort && !table.Locked) state.Home = -1;
             if (state.Home >= 0) homes[state.Home]++;
-            if (state.Active >= 0 && table.Locked) active[state.Active]++;
+            if (state.Active >= 0 && (table.Locked || state.DragOrigin.HasValue)) active[state.Active]++;
         }
 
-        foreach (var table in candidates)
+        foreach (var table in tables)
         {
             var state = _placements[table];
-            if (table.Locked) continue;
+            if (table.Locked || state.Detached || state.DragOrigin.HasValue) continue;
             if (LayoutOnly) table.InActiveSlot = false;
             if (state.Home < 0)
-                state.Home = Claim(homeSlots, homes, TableManagerConfig.AnyActiveSlot);
+                state.Home = Claim(homeSlots, homes);
             if (LayoutOnly) continue;
 
             bool wantsActive = table.HeroAct ||
                 state.OpenedActive ||
                 (table.InActiveSlot && table.HeroInHand);
             if (table.HeroAct || table.HeroInHand || table.HeroFolded) state.OpenedActive = false;
-            if (state.Active >= 0 && (!wantsActive || sort)) state.Active = -1;
+            if (state.Active >= 0 && !wantsActive) state.Active = -1;
             if (state.Active >= 0) active[state.Active]++;
             table.InActiveSlot = wantsActive;
         }
 
         // Existing active assignments reserve their slots before another table can claim one.
-        foreach (var table in candidates)
+        foreach (var table in tables)
         {
             var state = _placements[table];
-            if (table.Locked || !table.InActiveSlot || state.Active >= 0) continue;
-            var binding = state.Home < 0 ? TableManagerConfig.AnyActiveSlot : homeSlots[state.Home].Bind;
-            if (binding != TableManagerConfig.NoBinding)
-                state.Active = Claim(activeSlots, active, binding);
+            if (table.Locked || state.Detached || state.DragOrigin.HasValue || !table.InActiveSlot || state.Active >= 0) continue;
+            state.Active = Claim(activeSlots, active);
         }
 
         var occupancy = new Dictionary<Rectangle, int>();
-        foreach (var table in candidates)
+        foreach (var table in tables)
         {
             var state = _placements[table];
-            if (!table.Locked)
+            if (!table.Locked && !state.Detached && !state.DragOrigin.HasValue)
             {
                 table.InActiveSlot = state.Active >= 0;
                 table.PlacedSlot = state.Active >= 0 ? state.Active : state.Home;
-                var slots = state.Active >= 0 ? activeSlots : homeSlots;
                 if (table.PlacedSlot < 0) state.Bounds = null;
                 else
                 {
-                    var slot = slots[table.PlacedSlot];
-                    if (state.Active >= 0 || !_geometryPreview.TryGetValue(table.PlacedSlot, out var bounds))
-                        bounds = new Rectangle(slot.Left, slot.Top, slot.Width, slot.EffectiveHeight);
+                    var bounds = SlotBounds(state.Active >= 0, table.PlacedSlot);
                     bool geometryChanged = state.Bounds != bounds;
-                    if (now >= state.NextMove && (sort || geometryChanged ||
-                        (_place == null && PositionChanged(table.Hwnd, bounds.Location))))
+                    if (now >= state.NextMove && geometryChanged)
                     {
-                        bool placed = _place?.Invoke(table.Hwnd, bounds) ?? PlaceWindow(table.Hwnd, bounds, geometryChanged || sort);
-                        if (placed) state.Bounds = bounds;
+                        bool placed = _place?.Invoke(table.Hwnd, bounds) ?? PlaceWindow(table.Hwnd, bounds);
+                        if (placed)
+                        {
+                            state.Bounds = bounds;
+                            state.SettledBounds = null;
+                        }
                         state.NextMove = placed ? (_place == null ? now + 150 : now) : now + MoveRetryMs;
                     }
                 }
@@ -173,29 +153,98 @@ public sealed class TableManagerEngine
             if (state.Bounds is Rectangle rect)
                 occupancy[rect] = occupancy.GetValueOrDefault(rect) + 1;
         }
-        foreach (var table in candidates)
+        foreach (var table in tables)
         {
             var bounds = _placements[table].Bounds;
             table.TablesInSlot = bounds is Rectangle rect ? occupancy[rect] : 1;
         }
     }
 
-    private static int Claim(IReadOnlyList<TableManagerConfig.Slot> slots, int[] occupied, int binding)
+    private Rectangle SlotBounds(bool active, int index)
     {
-        if (binding == TableManagerConfig.AnyActiveSlot)
+        if (!active && _geometryPreview.TryGetValue(index, out var preview)) return preview;
+        var slot = (active ? Config.ActiveSlots : Config.InactiveSlots)[index];
+        return new Rectangle(slot.Left, slot.Top, slot.Width, slot.EffectiveHeight);
+    }
+
+    private static int Claim(IReadOnlyList<TableManagerConfig.Slot> slots, int[] occupied)
+    {
+        for (int i = 0; i < slots.Count; i++)
+            if (occupied[i] == 0) { occupied[i]++; return i; }
+        for (int i = 0; i < slots.Count; i++)
+            if (slots[i].Multislot) { occupied[i]++; return i; }
+        return -1;
+    }
+
+    private void TrackDrop(TableInfo table, Placement state)
+    {
+        if (NativeMethods.IsIconic(table.Hwnd) || NativeMethods.IsZoomed(table.Hwnd) ||
+            !NativeMethods.GetWindowRect(table.Hwnd, out var rect)) return;
+        var bounds = Rectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom);
+        if (NativeMethods.IsInMoveSize(table.Hwnd))
         {
-            binding = -1;
-            for (int i = 0; i < slots.Count; i++)
-                if (occupied[i] == 0) { binding = i; break; }
-            if (binding < 0)
-                for (int i = 0; i < slots.Count; i++)
-                    if (slots[i].Multislot) { binding = i; break; }
+            state.DragOrigin ??= state.SettledBounds ?? state.Bounds ?? bounds;
+            return;
         }
-        if (binding < 0 || binding >= slots.Count ||
-            (occupied[binding] > 0 && !slots[binding].Multislot))
-            return -1;
-        occupied[binding]++;
-        return binding;
+        var origin = state.DragOrigin ?? state.SettledBounds;
+        state.DragOrigin = null;
+        if (origin is Rectangle before && bounds.Location != before.Location)
+        {
+            DropTable(table, bounds, before);
+            return;
+        }
+        if (state.Bounds == null || state.Bounds.Value.Location == bounds.Location)
+            state.SettledBounds = bounds;
+    }
+
+    internal void DropTable(TableInfo table, Rectangle bounds, Rectangle origin)
+    {
+        var state = _placements[table];
+        bool active = state.Active >= 0;
+        int source = active ? state.Active : state.Home;
+        var slots = active ? Config.ActiveSlots : Config.InactiveSlots;
+        var center = new Point(bounds.Left + bounds.Width / 2, bounds.Top + bounds.Height / 2);
+        int target = Enumerable.Range(0, slots.Count)
+            .Where(i => SlotBounds(active, i).Contains(center))
+            .OrderByDescending(i =>
+            {
+                var overlap = Rectangle.Intersect(bounds, SlotBounds(active, i));
+                return (long)overlap.Width * overlap.Height;
+            }).FirstOrDefault(-1);
+        if (target < 0)
+        {
+            state.Home = state.Active = -1;
+            state.Detached = true;
+            state.Bounds = null;
+            state.SettledBounds = bounds;
+            ClearSlot(table);
+            return;
+        }
+
+        var occupant = _placements.FirstOrDefault(pair => pair.Key != table &&
+            (active ? pair.Value.Active == target : pair.Value.Home == target));
+        if (target != source && occupant.Key != null)
+        {
+            if (occupant.Key.Locked || occupant.Value.DragOrigin.HasValue) return;
+            if (active) occupant.Value.Active = source;
+            else occupant.Value.Home = source;
+            occupant.Value.Bounds = null;
+            occupant.Value.SettledBounds = null;
+            if (source < 0)
+            {
+                occupant.Value.Detached = true;
+                ClearSlot(occupant.Key);
+                if (_place != null) _place(occupant.Key.Hwnd, origin);
+                else PlaceWindow(occupant.Key.Hwnd, origin);
+            }
+            occupant.Value.NextMove = 0;
+        }
+        if (active) state.Active = target;
+        else state.Home = target;
+        state.Detached = false;
+        state.Bounds = null;
+        state.SettledBounds = null;
+        state.NextMove = 0;
     }
 
     private static void ClearSlot(TableInfo table)
@@ -205,10 +254,7 @@ public sealed class TableManagerEngine
         table.TablesInSlot = 1;
     }
 
-    private static bool PositionChanged(IntPtr hwnd, Point expected) =>
-        NativeMethods.GetWindowRect(hwnd, out var rect) && (rect.Left != expected.X || rect.Top != expected.Y);
-
-    private static bool PlaceWindow(IntPtr hwnd, Rectangle bounds, bool resize)
+    private static bool PlaceWindow(IntPtr hwnd, Rectangle bounds)
     {
         if (NativeMethods.IsIconic(hwnd) || NativeMethods.IsZoomed(hwnd) ||
             NativeMethods.IsHungAppWindow(hwnd) || NativeMethods.IsInMoveSize(hwnd) ||
@@ -219,7 +265,7 @@ public sealed class TableManagerEngine
         const uint moveOnly = 0x0001; // SWP_NOSIZE
         bool samePosition = current.Left == bounds.X && current.Top == bounds.Y;
         bool sameSize = current.Right - current.Left == bounds.Width && current.Bottom - current.Top == bounds.Height;
-        return (samePosition && (!resize || sameSize)) || NativeMethods.SetWindowPos(hwnd, IntPtr.Zero,
-            bounds.X, bounds.Y, bounds.Width, bounds.Height, resize && !sameSize ? asyncMove : asyncMove | moveOnly);
+        return (samePosition && sameSize) || NativeMethods.SetWindowPos(hwnd, IntPtr.Zero,
+            bounds.X, bounds.Y, bounds.Width, bounds.Height, sameSize ? asyncMove | moveOnly : asyncMove);
     }
 }

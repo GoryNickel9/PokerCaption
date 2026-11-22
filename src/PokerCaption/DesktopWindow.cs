@@ -111,13 +111,13 @@ internal static class DesktopWindow
         layout.Controls.Add(toolbar, 0, 0);
         var families = new TabControl { Dock = DockStyle.Fill, Margin = new Padding(0, 12, 0, 0) };
         layout.Controls.Add(families, 0, 1);
-        families.TabPages.Add(HudFamily("Table panels", "tablePanels", isTable: true));
+        families.TabPages.Add(HudFamily("Table panels", "tablePanels"));
         families.TabPages.Add(HudFamily("Player panels", "playerPanels"));
         families.TabPages.Add(HudFamily("General HUD", "generalHud", isGeneral: true));
         return page;
     }
 
-    private static TabPage HudFamily(string title, string prefix, bool isTable = false, bool isGeneral = false)
+    private static TabPage HudFamily(string title, string prefix, bool isGeneral = false)
     {
         var page = new TabPage(title) { BackColor = Canvas, Padding = new Padding(8) };
         var split = Columns(270);
@@ -147,23 +147,7 @@ internal static class DesktopWindow
         if (!isGeneral) formatActions.Controls.Add(Check(prefix + "Visible", "Visible", true));
         formatActions.Controls.Add(Button(prefix + "FontColor", "Text colour"));
         fields.Controls.Add(formatActions);
-        if (isTable)
-        {
-            fields.Controls.Add(Row(Button("SpeedButton32", "Font"), Button("SpeedButton23", "Background"),
-                Button("SpeedButton68", "Frame colour"), Button("SpeedButton126", "Position")));
-            var position = Stack();
-            position.Name = "Panel115";
-            position.Controls.Add(Row(Pair("X", "tablePanelsX", "UpDown103"), Pair("Y", "tablePanelsY", "UpDown104")));
-            fields.Controls.Add(position);
-            fields.Controls.Add(Row(Check("CheckBox93", "Transparent background", true), Check("CheckBox538", "Rounded"),
-                Check("CheckBox540", "Group with previous")));
-            fields.Controls.Add(Row(Pair("Padding", "Edit175", "UpDown120"), Pair("Frame", "Edit140", "UpDown106")));
-            fields.Controls.Add(Row(Check("CheckBox539", "Fixed width"), Pair("Pixels", "Edit139", "UpDown102")));
-            fields.Controls.Add(Row(Alignment("RadioGroup5", 1, "Horizontal", "Left", "Centre", "Right"),
-                Alignment("RadioGroup17", 0, "Vertical", "Top", "Middle", "Bottom")));
-            fields.Controls.Add(Row(Labeled("On click", Choice("ComboBox34")), Labeled("On hover", Choice("ComboBox23"))));
-        }
-        else if (isGeneral)
+        if (isGeneral)
         {
             fields.Controls.Add(Row(Button("generalHudFont", "Font"), Button("generalHudBackColor", "Background")));
         }
@@ -173,16 +157,8 @@ internal static class DesktopWindow
     private static TabPage BetsPage()
     {
         var page = new TabPage("Betscript") { BackColor = Canvas };
-        var layout = PageLayout();
-        page.Controls.Add(layout);
-        layout.Controls.Add(Row(Check("CheckBox72", "Enable BetScript", true), new Label
-        {
-            Name = "BetscriptLayoutNotice", Text = "Paused while Table Manager is enabled on Sisal.",
-            AutoSize = true, Visible = false, Margin = new Padding(10, 6, 0, 0)
-        }), 0, 0);
         var split = Columns(282);
-        split.Margin = new Padding(0, 12, 0, 0);
-        layout.Controls.Add(split, 0, 1);
+        page.Controls.Add(split);
 
         var rules = PageLayout();
         rules.BackColor = Color.White;
@@ -403,23 +379,10 @@ internal static class DesktopWindow
         return stack;
     }
 
-    private static Control Pair(string label, string edit, string spin) =>
-        Labeled(label, Row(Field(edit, label, 64), Spin(spin, label, -999999, 999999)));
-
-    private static Control Alignment(string name, int selected, string label, params string[] choices)
-    {
-        var group = Row();
-        group.Name = name;
-        for (int i = 0; i < choices.Length; i++)
-            group.Controls.Add(new RadioButton { Text = choices[i], Checked = i == selected, AutoSize = true });
-        return Labeled(label, group);
-    }
-
     private static TextBox Field(string name, string label, int width) =>
         new() { Name = name, AccessibleName = label, Width = width, BorderStyle = BorderStyle.FixedSingle };
 
-    private static ComboBox Choice(string name) =>
-        new() { Name = name, Width = 176, DropDownStyle = ComboBoxStyle.DropDownList };
+
 
     private static NumericUpDown Spin(string name, string label, int min, int max, int value = 0) =>
         new() { Name = name, AccessibleName = label, Minimum = min, Maximum = max, Width = 22,

@@ -10,7 +10,7 @@ namespace PokerCaption.Engine
 {
     /// <summary>
     /// Motore HUD: per ogni tavolo crea le finestre
-    /// overlay dei pannelli [HUD] (FormatStrN + custom_x/y + FrameColor), il
+    /// overlay dei pannelli [HUD] e della
     /// bet box in bb (bbBetboxX/Y, CustomBetBox, BetBoxFontSize/Bold, bbColor*,
     /// bbColorDiap*), gestisce RNG e refresh dei tag.
     /// </summary>
@@ -31,20 +31,13 @@ namespace PokerCaption.Engine
 
         public sealed class PanelDef
         {
-            public int Index;                     // indice INI (custom_x<i>/custom_y<i>)
+            public int Index;                     // indice INI
             public string Format;
-            public double X, Y;
-            public Color FrameColor;
             public Color FontColor = Color.White; // FontColor_i (testo)
             public int FontSize = 10;             // FontSize_i
             public bool PlayerPanel;
             internal readonly Dictionary<int, PointF> SeatOffsets = new();
             public bool Visible = true;
-            public string OnClickParam;
-            public string OnClick, OnHover, FontName = "Tahoma";
-            public Color Background;
-            public bool Bold = true, Rounded, Group;
-            public int BorderWidth, FrameWidth, FixedWidth, Align = 1, AlignVertical;
         }
 
         public readonly List<PanelDef> Panels = new List<PanelDef>();
@@ -102,32 +95,14 @@ namespace PokerCaption.Engine
                 // la chiave esiste — i pannelli possono essere aggiunti/triminati dalla UI
                 for (int i = 0; i < 64; i++)
                 {
-                    // pannelli tabella: FormatStrN + custom_x/y + FrameColor
+                    // Pannelli tabella in ordine di configurazione.
                     var f = ini.Get("HUD", "FormatStr" + i);
                     if (f == null) break;
                     Panels.Add(new PanelDef
                     {
                         Index = i,
                         Format = f,
-                        X = ini.GetDouble("HUD", "custom_x" + i, 10),
-                        Y = ini.GetDouble("HUD", "custom_y" + i, 10),
-                        FrameColor = IniColors.FromInt(ini.GetLong("HUD", "FrameColor" + i, 0xFFFFFF)),
                         FontColor = IniColors.FromInt(ini.GetLong("HUD", "FontColor" + i, 0xFFFFFF)),
-                        FontSize = ini.GetInt("HUD", "FontSize" + i, 10),
-                        FontName = ini.Get("HUD", "FontName" + i) ?? "Tahoma",
-                        Bold = ini.GetBool("HUD", "FontBold" + i, true),
-                        Background = ini.GetBool("HUD", "FontInvisibleBack" + i, true) ? Color.Empty :
-                            IniColors.FromInt(ini.GetLong("HUD", "FontBackground" + i, 0x303030)),
-                        BorderWidth = Math.Clamp(ini.GetInt("HUD", "FrameWidth" + i, 0), 0, 40),
-                        FrameWidth = Math.Clamp(ini.GetInt("HUD", "frame_width" + i, 0), 0, 99),
-                        FixedWidth = ini.GetBool("HUD", "fixed_width_en" + i, false) ?
-                            Math.Clamp(ini.GetInt("HUD", "fixed_width" + i, 0), 0, 999) : 0,
-                        Align = Math.Clamp(ini.GetInt("HUD", "FontAlign" + i, 1), 0, 2),
-                        AlignVertical = Math.Clamp(ini.GetInt("HUD", "FontAlignV" + i, 0), 0, 2),
-                        Group = ini.GetBool("HUD", "Group" + i, false),
-                        Rounded = ini.GetBool("HUD", "Rounded" + i, false),
-                        OnClick = ini.Get("HUD", "PanelClick" + i),
-                        OnHover = ini.Get("HUD", "PanelHover" + i),
                         PlayerPanel = false,
                         Visible = ini.GetBool("HUD", "FVisible" + i, true)
                     });
@@ -141,8 +116,6 @@ namespace PokerCaption.Engine
                     {
                         Index = i,
                         Format = pf,
-                        X = 0, Y = 0,
-                        FrameColor = IniColors.FromInt(ini.GetLong("HUD", "plFrameColor" + i, 0xFFFFFF)),
                         FontColor = IniColors.FromInt(ini.GetLong("HUD", "plFontColor" + i, 0xFFFFFF)),
                         FontSize = ini.GetInt("HUD", "plFontSize" + i, 10),
                         PlayerPanel = true,
@@ -161,59 +134,6 @@ namespace PokerCaption.Engine
             // The next tick must rebuild the windows when definitions are added or removed.
             if (previousTablePanelCount != Panels.Count(p => !p.PlayerPanel))
                 foreach (var hwnd in _perTable.Keys.ToList()) DestroyTablePanels(hwnd);
-        }
-
-        /// <summary>Rilascio di un pannello trascinato: converte in custom_x/y (coordinate
-        /// tavolo, scalate) e salva nell'INI.</summary>
-        private void SavePanelPos(int panelIndex, TableInfo t, int screenX, int screenY)
-        {
-            try
-            {
-                var def = Panels.FirstOrDefault(p => !p.PlayerPanel && p.Index == panelIndex);
-                if (def == null) return;
-                var scale = TableScale(t);
-                int height = _perTable[t.Hwnd][panelIndex].Height;
-                double dx = (screenX - t.Rect.Left) / scale - def.X;
-                double dy = (screenY + height * def.AlignVertical / 2 - t.Rect.Top) / scale - def.Y;
-                foreach (var peer in GroupFor(panelIndex))
-                {
-                    peer.X += dx;
-                    peer.Y += dy;
-                    Program.Ini.Set("HUD", "custom_x" + peer.Index,
-                        peer.X.ToString(System.Globalization.CultureInfo.InvariantCulture));
-                    Program.Ini.Set("HUD", "custom_y" + peer.Index,
-                        peer.Y.ToString(System.Globalization.CultureInfo.InvariantCulture));
-                }
-                Program.Ini.Save();
-                _log($"HUD: pannello #{def.Index + 1} spostato in {def.X:0.#},{def.Y:0.#} su '{t.TableName}'");
-            }
-            catch (Exception ex) { _log("HUD: save posizione ERR: " + ex.Message); }
-        }
-
-        private IEnumerable<PanelDef> GroupFor(int index)
-        {
-            var panels = Panels.Where(panel => !panel.PlayerPanel).ToArray();
-            if (index < 0 || index >= panels.Length) yield break;
-            int first = index;
-            while (first > 0 && panels[first].Group) first--;
-            for (int i = first; i < panels.Length && (i == first || panels[i].Group); i++) yield return panels[i];
-        }
-
-        private void OnPanelClick(int index, TableInfo table)
-        {
-            var def = Panels.FirstOrDefault(p => !p.PlayerPanel && p.Index == index);
-            switch (def?.OnClick)
-            {
-                case "Copy to clipboard":
-                    var text = HudTags.Resolve(def.Format, BuildContext(table, new[] { table }));
-                    if (text.Length > 0) Clipboard.SetText(text);
-                    break;
-                case "Reset session tags": SessionStats.Current.ResetSessionTags(); break;
-                case "Lock table in slot": table.Locked = !table.Locked; break;
-                case "New [RNG] value": OnTick(new[] { table }); break;
-                case "Close the table": NativeMethods.PostMessageW(table.Hwnd, 0x10, IntPtr.Zero, IntPtr.Zero); break;
-                case "Minimize table": NativeMethods.PostMessageW(table.Hwnd, 0x112, (IntPtr)0xF020, IntPtr.Zero); break;
-            }
         }
 
         /// <summary>True se il tavolo è la finestra visibile al proprio centro (coperta → HUD nascosto).</summary>
@@ -270,25 +190,7 @@ namespace PokerCaption.Engine
                     foreach (var def in Panels)
                     {
                         if (def.PlayerPanel) continue;
-                        var p = new HudTextPanel(clickThrough: LockPanels);
-                        p.Draggable = !LockPanels;
-                        int panelIndex = def.Index;
-                        p.DraggedTo += (sx, sy) => SavePanelPos(panelIndex, t, sx, sy);
-                        p.PanelClicked += () => OnPanelClick(panelIndex, t);
-                        p.Move += (_, _) =>
-                        {
-                            if (!p.Dragging) return;
-                            foreach (var peer in GroupFor(panelIndex))
-                            {
-                                if (peer.Index == panelIndex || peer.Index >= panels.Count) continue;
-                                var leader = Panels[panelIndex];
-                                var target = panels[peer.Index];
-                                var scale = TableScale(t);
-                                target.MoveTo(new Rectangle(p.Left + (int)((peer.X - leader.X) * scale),
-                                    p.Top + (int)((peer.Y - leader.Y) * scale) + p.Height * leader.AlignVertical / 2 - target.Height * peer.AlignVertical / 2,
-                                    target.Width, target.Height));
-                            }
-                        };
+                        var p = new HudTextPanel(clickThrough: true);
                         p.Show();
                         OverlayUtil.ShowNoActivate(p);
                         panels.Add(p);
@@ -300,38 +202,18 @@ namespace PokerCaption.Engine
 
                 var ctx = BuildContext(t, tables);
 
-                // pannelli [HUD]: testo flottante sul tavolo,
-                // colore FontColor_i e dimensione FontSize_i, posizione custom_x/y
                 int idx = 0;
-                foreach (var def in Panels)
+                int y = t.Rect.Top + (int)((t.Rect.Bottom - t.Rect.Top) * 0.24);
+                int center = t.Rect.Left + (t.Rect.Right - t.Rect.Left) / 2;
+                foreach (var def in Panels.Where(def => !def.PlayerPanel))
                 {
-                    if (def.PlayerPanel || idx >= panels.Count) { if (!def.PlayerPanel) idx++; continue; }
-                    var p = panels[idx++];
-                    if (!def.Visible || !onTop || !HudTags.Visible(def.Format, ctx)) { p.Visible = false; continue; }
-                    var text = HudTags.Resolve(def.Format, ctx);
-                    p.SetClickThrough(LockPanels && string.IsNullOrEmpty(def.OnClick) && string.IsNullOrEmpty(def.OnHover));
-                    p.BackColorOverride = def.Background;
-                    string tooltip = def.OnHover switch
-                    {
-                        "General HUD" when Program.Service?.GenHud is { } general => string.Join(Environment.NewLine,
-                            general.Items.Select(item => HudTags.Resolve(item.Format, ctx))),
-                        "BB bet value" when t.Bet > 0 && t.Bb > 0 => $"{t.Bet / t.Bb:0.##} BB",
-                        _ => ""
-                    };
-                    if (_hoverTip.GetToolTip(p) != tooltip) _hoverTip.SetToolTip(p, tooltip);
-                    p.SetRuns(new List<(string, Color, Color, int, bool)>
-                    {
-                        (text, def.FontColor == Color.Empty ? Color.White : def.FontColor,
-                         Color.Empty, def.FontSize, def.Bold)
-                    }, new Padding(def.BorderWidth + def.FrameWidth), def.FixedWidth, align: def.Align,
-                        fontName: def.FontName, frameColor: def.FrameColor, frameWidth: def.FrameWidth, rounded: def.Rounded);
-                    var scale = TableScale(t);
-                    if (!p.Dragging) // durante il drag la posizione è dell'utente
-                        p.MoveTo(new Rectangle(
-                            t.Rect.Left + (int)(def.X * scale),
-                            t.Rect.Top + (int)(def.Y * scale) - p.Height * def.AlignVertical / 2,
-                            p.Width, p.Height));
-                    OverlayUtil.ShowNoActivate(p);
+                    var panel = panels[idx++];
+                    string text = def.Visible && onTop && HudTags.Visible(def.Format, ctx) ? HudTags.Resolve(def.Format, ctx) : "";
+                    if (string.IsNullOrWhiteSpace(text)) { panel.Visible = false; continue; }
+                    panel.SetRuns([(text, def.FontColor, Color.Empty, def.FontSize, true)], Padding.Empty);
+                    panel.MoveTo(new Rectangle(center - panel.Width / 2, y, panel.Width, panel.Height));
+                    OverlayUtil.ShowNoActivate(panel);
+                    y += panel.Height + 2;
                 }
 
                 UpdatePlayerPanels(t, ctx, onTop);
@@ -515,12 +397,10 @@ namespace PokerCaption.Engine
             foreach (var k in _perTable.Keys.Union(_perPlayer.Keys).Union(_bbBoxes.Keys).ToList()) DestroyTable(k);
         }
 
-        private readonly ToolTip _hoverTip = new();
 
         public void Dispose()
         {
             DestroyAll();
-            _hoverTip.Dispose();
         }
     }
 }

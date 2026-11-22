@@ -22,7 +22,6 @@ namespace PokerCaption.Engine
         }
 
         public readonly List<Rule> Rules = new List<Rule>();
-        public bool Enabled;
         public bool Log;
         public int SpinDelayMs = 1000;
 
@@ -36,7 +35,6 @@ namespace PokerCaption.Engine
             int count = ini.GetInt(RuleSection, "Count", 0);
             for (int i = 0; i < count; i++)
                 Rules.Add(ReadRule(ini, i));
-            Enabled = ini.GetBool("PokerCaption", "BetscriptOn", true);
             Log = ini.GetBool("PokerCaption", "BetscriptLog", false);
             SpinDelayMs = Math.Max(0, ini.GetInt("PokerCaption", "StartSpinDelay", 1000));
         }
@@ -55,12 +53,12 @@ namespace PokerCaption.Engine
         /// </summary>
         public string Apply(TableInfo t)
         {
-            if (!Enabled || t == null || !t.HeroAct) return null;
+            if (t == null || !t.HeroAct) return null;
             int turn = t.BetScriptTurn;
             if (t.LastPrefilledTurn == turn || t.Pot <= 0 || t.Stack <= 0) return null;
             bool coords = t.Editor == IntPtr.Zero;
             if (coords && (ClientProfile.Interaction != "coords" ||
-                Native.NativeMethods.GetForegroundWindow() != t.Hwnd)) return null;
+                Native.NativeMethods.GetForegroundWindow() != t.Hwnd || Native.NativeMethods.IsInMoveSize(t.Hwnd))) return null;
 
             string currentText = coords ? null : TableScanner.GetText(t.Editor, 64);
             double? betBox = !string.IsNullOrWhiteSpace(currentText) &&

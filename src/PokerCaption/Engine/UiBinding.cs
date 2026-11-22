@@ -18,7 +18,6 @@ namespace PokerCaption.Engine
             new("cbCloseMyNews", "PokerCaption", "CloseMyNews"),
             new("cbCloseLogoutInfo", "PokerCaption", "CloseLogoutInfo"),
             new("cbStarsAccountInfo", "PokerCaption", "StarsAccountInfo"),
-            new("CheckBox72", "PokerCaption", "BetscriptOn"),
             new("hudActive", "HUD", "HudActive"),
             new("lockGeneral", "HUD", "LockGeneral"),
             new("lockHud", "HUD", "LockHUD"),

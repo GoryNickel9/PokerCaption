@@ -21,14 +21,7 @@ namespace PokerCaption.Engine
         private static readonly Color KeyColor = Color.FromArgb(1, 2, 3);
         internal static Color Key => KeyColor;
 
-        public bool ClickThrough { get; private set; }
-
-        internal void SetClickThrough(bool enabled)
-        {
-            if (ClickThrough == enabled) return;
-            ClickThrough = enabled;
-            if (IsHandleCreated) UpdateStyles();
-        }
+        public bool ClickThrough { get; }
 
         public OverlayWindow(bool clickThrough)
         {
@@ -65,16 +58,13 @@ namespace PokerCaption.Engine
     public sealed class HudTextPanel : OverlayWindow
     {
         public Color BackColorOverride = Color.Empty;
-        public int FrameWidth;
 
         /// <summary>True con 'Lock HUD' deselezionato: il pannello si trascina col mouse.</summary>
         public bool Draggable;
         /// <summary>Rilascio dopo un drag: coordinate schermo del pannello.</summary>
         public event Action<int, int> DraggedTo;
-        internal event Action PanelClicked;
         private MouseButtons _dragButton;
         private Point _dragCursor, _dragOrigin;
-        public bool NativeMoving => Dragging;
         public bool Dragging => _dragButton != MouseButtons.None;
 
         public HudTextPanel(bool clickThrough) : base(clickThrough)
@@ -144,7 +134,6 @@ namespace PokerCaption.Engine
                 Capture = false;
                 if (moved) DraggedTo?.Invoke(Left, Top);
             }
-            if (e.Button == MouseButtons.Left && !moved && ClientRectangle.Contains(e.Location)) PanelClicked?.Invoke();
             base.OnMouseUp(e);
         }
 
@@ -171,11 +160,8 @@ namespace PokerCaption.Engine
             ReleaseDC(IntPtr.Zero, screenDc);
         }
 
-        /// <summary>Imposta i run di testo (testo+colori) e ridimensiona il pannello
-        /// disegnandoli sulla superficie layered. align: 0=sx, 1=centro, 2=dx.</summary>
-        public void SetRuns(List<(string text, Color color, Color back, int fontSize, bool bold)> runs, Padding pad,
-            int boxWidth = 0, bool centerAlign = false, int align = 1, string fontName = "Tahoma",
-            Color frameColor = default, int frameWidth = 0, bool rounded = false)
+        /// <summary>Misura e disegna le righe di testo sulla superficie del pannello.</summary>
+        public void SetRuns(List<(string text, Color color, Color back, int fontSize, bool bold)> runs, Padding pad)
         {
             /* misura: larghezza/altezza necessarie */
             using var measure = new Bitmap(1, 1);
@@ -186,21 +172,16 @@ namespace PokerCaption.Engine
             foreach (var r in runs)
             {
                 if (string.IsNullOrEmpty(r.text)) continue;
-                var font = new Font(fontName, r.fontSize <= 0 ? 9 : r.fontSize, r.bold ? FontStyle.Bold : FontStyle.Regular);
+                var font = new Font("Tahoma", r.fontSize <= 0 ? 9 : r.fontSize, r.bold ? FontStyle.Bold : FontStyle.Regular);
                 fonts.Add(font);
                 var sz = mg.MeasureString(r.text, font);
                 float rw = sz.Width + 4, rh = sz.Height + 1;
                 float rx = pad.Left;
-                if (boxWidth > 0)
-                {
-                    rx = align switch { 0 => pad.Left, 2 => boxWidth - pad.Right - rw, _ => (boxWidth - rw) / 2f };
-                    if (rx < 0) rx = pad.Left;
-                }
                 placed.Add((r.text, font, r.color, r.back, rx, y, rw, rh));
                 maxW = Math.Max(maxW, rx + rw + pad.Right);
                 y += rh;
             }
-            int w = (int)Math.Ceiling(boxWidth > 0 ? boxWidth : Math.Max(maxW + pad.Horizontal, 24));
+            int w = (int)Math.Ceiling(Math.Max(maxW + pad.Horizontal, 24));
             int h = (int)Math.Ceiling(y + pad.Vertical);
             if (w < 8) w = 8;
             if (h < 8) h = 8;
@@ -209,22 +190,10 @@ namespace PokerCaption.Engine
             using (var g = Graphics.FromImage(bmp))
             {
                 g.Clear(Color.FromArgb(0, 0, 0, 0));
-                using var shape = new System.Drawing.Drawing2D.GraphicsPath();
-                int diameter = Math.Min(12, Math.Min(w - 1, h - 1));
-                if (rounded && diameter > 1)
-                {
-                    shape.AddArc(0, 0, diameter, diameter, 180, 90);
-                    shape.AddArc(w - 1 - diameter, 0, diameter, diameter, 270, 90);
-                    shape.AddArc(w - 1 - diameter, h - 1 - diameter, diameter, diameter, 0, 90);
-                    shape.AddArc(0, h - 1 - diameter, diameter, diameter, 90, 90);
-                    shape.CloseFigure();
-                    g.SetClip(shape);
-                }
-                else shape.AddRectangle(new Rectangle(0, 0, w - 1, h - 1));
                 if (BackColorOverride != Color.Empty)
                 {
                     using var background = new SolidBrush(BackColorOverride);
-                    g.FillPath(background, shape);
+                    g.FillRectangle(background, 0, 0, w, h);
                 }
                 /* sbloccato: velo quasi invisibile (alpha 6) → l'intero pannello è cliccabile */
                 if (Draggable)
@@ -243,12 +212,6 @@ namespace PokerCaption.Engine
                     }
                     using var brush = new SolidBrush(p.color);
                     g.DrawString(p.text, p.font, brush, p.x, p.y + 1);
-                }
-                if (frameWidth > 0 && frameColor != Color.Empty)
-                {
-                    using var pen = new Pen(frameColor, frameWidth * 2);
-                    g.SetClip(shape);
-                    g.DrawPath(pen, shape);
                 }
             }
             foreach (var f in fonts) f.Dispose();

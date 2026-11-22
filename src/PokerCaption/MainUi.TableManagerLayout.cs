@@ -38,7 +38,6 @@ internal sealed class TableManagerPanel : Panel
     private readonly ComboBox _profiles = Choice("Layout");
     private readonly CheckBox _enabled = new() { Text = "Enable Table Manager", AutoSize = true };
     private readonly ListBox _slots = new() { AccessibleName = "Slots", IntegralHeight = false };
-    private readonly ComboBox _binding = Choice("Active slot binding");
     private readonly NumericUpDown _left = Number(int.MinValue, int.MaxValue);
     private readonly NumericUpDown _top = Number(int.MinValue, int.MaxValue);
     private readonly NumericUpDown _width = Number(1, int.MaxValue);
@@ -89,12 +88,11 @@ internal sealed class TableManagerPanel : Panel
         Field(_geometry, "Width", _width, 13, 75, 75);
         Field(_geometry, "Height", _height, 99, 75, 75);
         LabelAt(_geometry, "Use −1 for automatic height", 13, 121);
-        Field(_geometry, "Active slot binding", _binding, 13, 151, 161);
-        Put(_geometry, _stack, 13, 218, 162, 45);
+        Put(_geometry, _stack, 13, 156, 162, 45);
         _stack.AutoSize = false;
 
         if (manager.RenderedClient)
-            LabelAt(this, "Sisal uses home slots.\r\nBetScript and other automatic input pause\r\nwhile Table Manager is enabled.", 513, 122);
+            LabelAt(this, "Sisal uses home slots.\r\nWheel and automatic dialogs pause\r\nwhile Table Manager is enabled.", 513, 122);
 
         _apply = ButtonAt(this, "Save and activate", 20, 495, 132, Apply);
         _apply.BackColor = DesktopWindow.Accent;
@@ -109,7 +107,6 @@ internal sealed class TableManagerPanel : Panel
         _slots.SelectedIndexChanged += (_, _) => { if (!_loading) DisplaySlot(); };
         foreach (var control in new[] { _left, _top, _width, _height })
             control.ValueChanged += (_, _) => UpdateSlot();
-        _binding.SelectedIndexChanged += (_, _) => UpdateSlot();
         _stack.CheckedChanged += (_, _) => UpdateSlot();
         Run(Reload);
     }
@@ -196,13 +193,6 @@ internal sealed class TableManagerPanel : Panel
         _width.Value = slot.Width;
         _height.Value = Math.Max(-1, slot.Height);
         _stack.Checked = slot.Multislot;
-        _binding.Enabled = !_manager.RenderedClient;
-        _binding.Items.Clear();
-        _binding.Items.AddRange(new[] { "Any active slot", "No active slot" });
-        for (int active = 0; active < _draft.ActiveSlots.Count; active++)
-            _binding.Items.Add($"Active slot {active + 1}");
-        int choice = slot.Bind + 2;
-        _binding.SelectedIndex = choice >= 0 && choice < _binding.Items.Count ? choice : 1;
         _loading = false;
     }
 
@@ -216,7 +206,6 @@ internal sealed class TableManagerPanel : Panel
         slot.Width = (int)_width.Value;
         slot.Height = (int)_height.Value;
         slot.Multislot = _stack.Checked;
-        if (_binding.Enabled) slot.Bind = _binding.SelectedIndex - 2;
         _slots.Items[i] = SlotLabel(slot, i);
         if (IsCurrentLayout())
         {

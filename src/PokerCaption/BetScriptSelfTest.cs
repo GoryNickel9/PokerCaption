@@ -137,20 +137,31 @@ namespace PokerCaption
         internal static void CheckPrefill(Action<string, bool, string> check)
         {
             var rule = new BetScriptEngine.Rule { Streets = 2, Formula = "pot / 2", RoundPercent = 100, PushPercent = 50 };
-            var engine = new BetScriptEngine { Enabled = true };
+            using var service = new TableService(null, null);
+            var legacy = new IniFile(null);
+            legacy.Set("PokerCaption", "TableManagerOn", 1);
+            legacy.Set("PokerCaption", "BetscriptOn", 0);
+            service.Manager.RenderedClient = true;
+            service.Manager.Load(legacy);
+            var engine = service.Betscript;
+            engine.Load(legacy);
             engine.Rules.Add(rule);
             using var editor = new TextBox { Text = "1" };
             var table = new TableInfo
             {
-                Editor = editor.Handle, HeroAct = true, Street = 2, Bb = 1, Sb = 0.5, Pot = 5,
+                Editor = editor.Handle, Street = 2, Bb = 1, Sb = 0.5, Pot = 5,
                 Stack = 5, AmountToCall = 0, MaxSeats = 2,
             };
             table.SeatStacks.Add(1, 5);
             table.SeatStacks.Add(2, 7);
 
             var preview = engine.EvaluateScenario(BetScriptEngine.ScenarioForTable(table, 1));
-            check("BetScript prefill matches preview after rounding and shove",
-                preview.Text == "5" && engine.Apply(table) == preview.Text && editor.Text == preview.Text, editor.Text);
+            service.ObserveHeroAction(table, true);
+            bool skippedStaleScan = service.ApplyScannedBetScript(table, heroStackSeen: true) == null && editor.Text == "1";
+            table.BetScriptScanTurn = table.BetScriptTurn;
+            check("BetScript prefills a fresh turn with layout enabled and ignores the old toggle",
+                service.Manager.LayoutOnly && skippedStaleScan && preview.Text == "5" &&
+                service.ApplyScannedBetScript(table, heroStackSeen: true) == preview.Text && editor.Text == preview.Text, editor.Text);
             editor.Text = "4";
             check("BetScript prefill preserves manual edits on the same turn",
                 engine.Apply(table) == null && editor.Text == "4", editor.Text);

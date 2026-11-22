@@ -170,8 +170,6 @@ namespace PokerCaption
             defaults.Set("Client", "ToolTipClass", "FlutterOnlinePokerToolTipClass");
             defaults.Set("HUD", "HudActive", "1");
             defaults.Set("HUD", "FormatStr0", "Pot [pot_bb] BB");
-            defaults.Set("HUD", "custom_x0", 326);
-            defaults.Set("HUD", "custom_y0", 205);
             defaults.Set("HUD", "plFormatStr0", "[actions]");
             defaults.Set("GenHUD", "active", "1");
             defaults.Set("GenHUD", "Count", 2);
@@ -334,7 +332,7 @@ namespace PokerCaption
 
             // --- binding map (Fase B) ---
             var map = UiBinding.Settings;
-            Check("desktop settings bind to unique controls", map.Count == 8 && map.Select(item => item.Control).Distinct().Count() == map.Count);
+            Check("desktop settings bind to unique controls", map.Count == 7 && map.Select(item => item.Control).Distinct().Count() == map.Count);
 
             // --- tag HUD (Fase 7) ---
             var tc = new TagContext
@@ -528,9 +526,8 @@ namespace PokerCaption
             // --- pannelli HUD (MainUi.HudPanels): scrittura UI ↔ lettura motori ---
             var tmpPanels = Path.Combine(Path.GetTempPath(), "sc_panels.ini");
             File.WriteAllText(tmpPanels,
-                "[HUD]\r\nFormatStr0=[effSPR]\r\ncustom_x0=539\r\ncustom_y0=308\r\nFrameColor0=0\r\n" +
-                "FormatStr1=Odds:[%]\r\ncustom_x1=435\r\ncustom_y1=306\r\nFrameColor1=0\r\n" +
-                "plFormatStr0=[actions]\r\nplFVisible0=1\r\nplFrameColor0=0\r\n" +
+                "[HUD]\r\nFormatStr0=[effSPR]\r\nFormatStr1=Odds:[%]\r\n" +
+                "plFormatStr0=[actions]\r\nplFVisible0=1\r\n" +
                 "[GenHUD]\r\nCount=4\r\nformatStr0=Session\\stime\r\nformatStr1=[sessionTime]\r\nformatStr2=Hands\r\nformatStr3=[allHandsCount]\r\nactive=1\r\n");
             var pin = IniFile.Load(tmpPanels);
 
@@ -569,7 +566,7 @@ namespace PokerCaption
 
             // Add new panel (Table panels): FormatStr2 senza Count → il motore lo vede
             var hsec = pin.GetOrAddSection("HUD");
-            hsec["FormatStr2"] = ""; hsec["custom_x2"] = "10"; hsec["custom_y2"] = "10"; hsec["FrameColor2"] = "0";
+            hsec["FormatStr2"] = "";
             var hudE = new HudEngine(_ => { }); hudE.Load(pin);
             Check("HUD add pannello tabella", hudE.Panels.Count(p => !p.PlayerPanel) == 3 && hudE.Panels.Count(p => p.PlayerPanel) == 1,
                 hudE.Panels.Count + " pannelli");
@@ -645,6 +642,11 @@ namespace PokerCaption
                 Check("HUD editor exposes all three panel families",
                     new[] { "tablePanelsList", "playerPanelsList", "generalHudPanelsList" }
                         .All(name => ui.Controls.Find(name, true).Single() is ListBox));
+                var tablePanels = DesktopWindow.Descendants(ui).OfType<TabPage>().Single(page => page.Text == "Table panels");
+                Check("Table HUD editor removes styling, placement and interaction controls",
+                    !DesktopWindow.Descendants(tablePanels).Any(c => c.Text is "Font" or "Background" or "Frame colour" or
+                        "Position" or "Transparent background" or "Rounded" or "Group with previous" or "Padding" or
+                        "Frame" or "Fixed width" or "Pixels" or "Horizontal" or "Vertical" or "On click" or "On hover"));
                 Check("Desktop surface contains all persisted settings",
                     map.All(item => ui.Controls.Find(item.Control, true).Single() is CheckBox));
                 BetScriptSelfTest.CheckEditor(ui, Check);

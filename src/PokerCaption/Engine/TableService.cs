@@ -104,9 +104,9 @@ namespace PokerCaption.Engine
                         catch (Exception ex) { _log("TM refresh ERR: " + ex.Message); }
                     }
                     Hud.FollowTables(_tables);
-                    if (now >= _nextHudScan && (!Manager.LayoutOnly || Hud.Active))
+                    if (now >= _nextHudScan)
                     {
-                        _nextHudScan = Environment.TickCount64 + (Hud.Active || Betscript.Enabled ? 200 : ScanDelaySec * 1000);
+                        _nextHudScan = Environment.TickCount64 + (Hud.Active || Betscript.Rules.Count > 0 ? 200 : ScanDelaySec * 1000);
                         ScanHud();
                     }
                 }
@@ -127,7 +127,6 @@ namespace PokerCaption.Engine
         internal void RefreshClientWork()
         {
             if (_timer == null) return;
-            foreach (var table in _tables) table.HeroAct = false;
             if (Manager.LayoutOnly)
             {
                 AutoDialog.Stop();
@@ -336,6 +335,8 @@ namespace PokerCaption.Engine
                 }
             }
             if (scanStatus != SharedMemory.CocosScanStatus.Walked) return;
+            if (Manager.RenderedClient)
+                ObserveHeroAction(t, t.AmountToCall.HasValue && !string.IsNullOrEmpty(t.HeroNick));
             var actions = _shared.ReadSeatActionEvents(t.Slot, ref t.LastActionSequence, out bool droppedActions, out uint? snapshotTick);
             if (droppedActions) _log($"HUD: coda azioni incompleta su '{t.TableName}'");
             int street = t.ActionHistory.Observe(t.HandStamp, _shared.ReadBoardCards(t.Slot),
@@ -343,10 +344,13 @@ namespace PokerCaption.Engine
             if (street > 0)
             {
                 t.Street = street;
-                if (!Manager.LayoutOnly && heroStackSeen && t.AmountToCall.HasValue && t.BetScriptScanTurn == t.BetScriptTurn)
-                    Betscript.Apply(t);
+                ApplyScannedBetScript(t, heroStackSeen);
             }
         }
+
+        internal string ApplyScannedBetScript(TableInfo table, bool heroStackSeen) =>
+            heroStackSeen && table.AmountToCall.HasValue && table.BetScriptScanTurn == table.BetScriptTurn && !Manager.IsMoving(table)
+                ? Betscript.Apply(table) : null;
 
         /// <summary>heroAct + hero-in-hand via pixel (client renderizzati).
         /// Gira su thread dedicato: niente jank UI. Isteresi su hero-in-hand
@@ -362,10 +366,13 @@ namespace PokerCaption.Engine
             ObserveHeroSample(t, heroInRaw);
             if (accent < 0) return; // cattura fallita
 
-            bool actNow = accent >= Pixels.MinAccentPixels || lime >= Pixels.MinButtonPixels;
+            if (!Manager.RenderedClient)
+                ObserveHeroAction(t, accent >= Pixels.MinAccentPixels || lime >= Pixels.MinButtonPixels);
+        }
 
-            // heroAct: pannello azione o pulsanti lime visibili
-            if (actNow)
+        internal void ObserveHeroAction(TableInfo t, bool canAct)
+        {
+            if (canAct)
             {
                 if (!t.HeroAct)
                 {
@@ -373,7 +380,7 @@ namespace PokerCaption.Engine
                     t.HeroAct = true;
                     t.HeroFolded = false;
                     Hud.OnHeroAct(t);
-                    _log($"heroAct (pixel accent={accent} lime={lime}) su '{t.TableName}'");
+                    _log($"heroAct su '{t.TableName}'");
                 }
                 t.LastHeroSeen = DateTime.Now;
             }

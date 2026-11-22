@@ -14,11 +14,8 @@ namespace PokerCaption
     /// (PageControl2: Table panels / Player panels / General HUD).
     /// Liste + CRUD (vedi sotto) e pannello proprietà a destra delle liste,
     /// cablato sui controlli del DFM di Form1 (nomi originali):
-    ///  - Table panels:  Edit121 (FormatStr_i), CheckBox104 (FVisible_i), Edit88/91
-    ///    (custom_x/y_i), SpeedButton33 (FrameColor_i), SpeedButton22 'Add tag',
-    ///    SpeedButton48/93 su/giù
-    ///  - Player panels: Edit120 (plFormatStr_i), CheckBox91 (plFVisible_i),
-    ///    SpeedButton52 (plFrameColor_i), SpeedButton53 'Add tag', SpeedButton58/59 su/giù
+    ///  - Table panels: formato, visibilità, colore del testo e ordine.
+    ///  - Player panels: formato, visibilità, colore del testo e ordine.
     ///  - General HUD: formato, font, colore del testo e sfondo.
     /// Il 'Add tag' apre il dialogo genHudAddTag e inserisce il
     /// tag al cursore. Ogni modifica: INI in memoria + salva su disco + ricarica
@@ -70,7 +67,6 @@ namespace PokerCaption
             public string ColorKey;                        // chiave scritta da BtnFontColor
             public long ColorKeyDefault = 0xFFFFFF;        // default se la chiave manca
             // General HUD only
-            public string EdX, EdY;
             public string BtnBkColor, BtnFont;
             public string BkColorKey = "FBkColor";
             public Action ReloadEngine;   // risincronizza il motore dopo la scrittura
@@ -81,7 +77,7 @@ namespace PokerCaption
         // Le chiavi delle condizioni "Show panel" (SOn*/SFor*/S_Caption) sono state
         // rimosse con il gruppo: i pannelli sono sempre visibili su qualsiasi variante.
         private static readonly Regex RxTablePanelKey = new Regex(
-            "^(FormatStr|custom_x|custom_y|FrameColor|onClickParam|PanelClick|PanelHover|Group|Rounded|FVisible|FontName|FontColor|FontSize|FontBold|FontAlign|FontAlignV|FrameWidth|FontBackground|FontInvisibleBack|fixed_width_en|fixed_width|frame_width)(\\d+)$",
+            "^(FormatStr|FVisible|FontColor)(\\d+)$",
             RegexOptions.IgnoreCase);
         // [HUD] pannelli giocatore: tutte le chiavi pl*<i>
         private static readonly Regex RxPlayerPanelKey = new Regex("^(pl(?:[A-Za-z_]+|Drag[XY]\\d+_))(\\d+)$", RegexOptions.IgnoreCase);
@@ -103,7 +99,6 @@ namespace PokerCaption
                         BtnUp = "tablePanelsMoveUp", BtnDown = "tablePanelsMoveDown",
                         EdFormat = "tablePanelsFormatStr", ChkVisible = "tablePanelsVisible", BtnAddTag = "tablePanelsAddTag",
                         BtnFontColor = "tablePanelsFontColor", ColorKey = "FontColor", ColorKeyDefault = 0xFFFFFF,
-                        EdX = "tablePanelsX", EdY = "tablePanelsY",
                         ReloadEngine = () => Program.Service?.Hud?.Load(Program.Ini)
                     },
                     new PanelKind
@@ -156,10 +151,6 @@ namespace PokerCaption
                     if (k.BtnAddTag != null)
                         WireBtn(f, k.BtnAddTag, () => InsertTag(f, k1), "'Add tag'");
 
-                    // extra Table panels: posizione x/y del pannello sul tavolo
-                    if (k.EdX != null) WireDouble(f, k1, k.EdX, "custom_x");
-                    if (k.EdY != null) WireDouble(f, k1, k.EdY, "custom_y");
-                    if (k.Primary == "FormatStr") WireTablePanelOptions(f, k);
 
                     // extra General HUD
                     if (k.BtnBkColor != null) WireColor(f, k1, k.BtnBkColor, k.BkColorKey, 0x404040);
@@ -240,115 +231,8 @@ namespace PokerCaption
                     ed.Text = i >= 0 ? (Program.Ini.Get(k.Section, k.Primary + i) ?? "") : "";
                 if (k.ChkVisible != null && Ctl(f, k.ChkVisible) is CheckBox chkVis)
                     chkVis.Checked = i < 0 || Program.Ini.GetBool(k.Section, k.VisibleKey + i, true);
-                if (k.EdX != null && Ctl(f, k.EdX) is TextBox edX)
-                    edX.Text = i < 0 ? "0" : Program.Ini.GetDouble(k.Section, "custom_x" + i, 0).ToString("0.####", CultureInfo.InvariantCulture);
-                if (k.EdY != null && Ctl(f, k.EdY) is TextBox edY)
-                    edY.Text = i < 0 ? "0" : Program.Ini.GetDouble(k.Section, "custom_y" + i, 0).ToString("0.####", CultureInfo.InvariantCulture);
-                if (k.Primary == "FormatStr") ReadTablePanelOptions(f, k, i);
             }
             finally { _panelsSync = false; }
-        }
-
-        private static readonly (string check, string key, bool fallback)[] TableFlags =
-        {
-            ("CheckBox93", "FontInvisibleBack", true), ("CheckBox538", "Rounded", false),
-            ("CheckBox539", "fixed_width_en", false), ("CheckBox540", "Group", false)
-        };
-
-        private static readonly (string edit, string spin, string key, int min, int max)[] TableNumbers =
-        {
-            ("Edit175", "UpDown120", "FrameWidth", 0, 40), ("Edit140", "UpDown106", "frame_width", 0, 99),
-            ("Edit139", "UpDown102", "fixed_width", 0, 999),
-            ("tablePanelsX", "UpDown103", "custom_x", -999999, 999999),
-            ("tablePanelsY", "UpDown104", "custom_y", -999999, 999999)
-        };
-
-        private static readonly (string control, string key, int fallback)[] TableAlignments =
-        {
-            ("RadioGroup5", "FontAlign", 1), ("RadioGroup17", "FontAlignV", 0)
-        };
-
-        private static readonly (string control, string key, string[] options)[] TableInteractions =
-        {
-            ("ComboBox34", "PanelClick", new[] { "None", "Copy to clipboard", "Reset session tags",
-                "New [RNG] value", "Lock table in slot", "Close the table", "Minimize table" }),
-            ("ComboBox23", "PanelHover", new[] { "None", "General HUD", "BB bet value" })
-        };
-
-        private void WireTablePanelOptions(Form f, PanelKind k)
-        {
-            WireColor(f, k, "SpeedButton23", "FontBackground", 0x303030);
-            WireColor(f, k, "SpeedButton68", "FrameColor", 0xFFFFFF);
-            WireBtn(f, "SpeedButton32", () => PickPanelFont(f, k), "Font");
-            WireBtn(f, "SpeedButton126", () =>
-            {
-                if (Ctl(f, "Panel115") is Control position)
-                {
-                    position.Visible = !position.Visible;
-                    if (position.Visible) position.BringToFront();
-                }
-            }, "Position");
-            foreach (var (name, key, _) in TableFlags)
-                if (Ctl(f, name) is CheckBox check)
-                    check.CheckedChanged += (_, _) => PanelFlagChanged(f, k, key, check.Checked, key);
-            foreach (var (editName, spinName, key, min, max) in TableNumbers)
-            {
-                if (key != "custom_x" && key != "custom_y") WireInt(f, k, editName, key, key);
-                if (Ctl(f, editName) is not TextBox edit || Ctl(f, spinName) is not NumericUpDown spin) continue;
-                spin.Minimum = min;
-                spin.Maximum = max;
-                spin.ValueChanged += (_, _) => { if (!_panelsSync) edit.Text = spin.Value.ToString(CultureInfo.InvariantCulture); };
-                edit.TextChanged += (_, _) =>
-                {
-                    if (_panelsSync || !decimal.TryParse(edit.Text, NumberStyles.Number, CultureInfo.InvariantCulture, out var value)) return;
-                    _panelsSync = true;
-                    try { spin.Value = Math.Clamp(decimal.Truncate(value), min, max); }
-                    finally { _panelsSync = false; }
-                };
-            }
-            foreach (var (name, key, _) in TableAlignments)
-                if (Ctl(f, name) is Control group)
-                    foreach (var radio in group.Controls.OfType<RadioButton>())
-                        radio.CheckedChanged += (_, _) =>
-                        {
-                            int i = SelectedIndex(f, k);
-                            if (_panelsSync || !radio.Checked || i < 0) return;
-                            SetPanelKey(k, key + i, RadioIndex(group).ToString(CultureInfo.InvariantCulture));
-                            PersistPanelField(f, k, i, updateRow: false);
-                        };
-            foreach (var (name, key, options) in TableInteractions)
-                if (Ctl(f, name) is ComboBox combo)
-                {
-                    combo.Items.Clear();
-                    combo.Items.AddRange(options);
-                    combo.SelectedIndexChanged += (_, _) =>
-                    {
-                        int i = SelectedIndex(f, k);
-                        if (_panelsSync || i < 0) return;
-                        SetPanelKey(k, key + i, combo.SelectedIndex > 0 ? combo.Text : "");
-                        PersistPanelField(f, k, i, updateRow: false);
-                    };
-                }
-        }
-
-        private void ReadTablePanelOptions(Form f, PanelKind k, int i)
-        {
-            foreach (var (name, key, fallback) in TableFlags)
-                if (Ctl(f, name) is CheckBox check)
-                    check.Checked = i >= 0 && Program.Ini.GetBool(k.Section, key + i, fallback);
-            foreach (var (editName, spinName, key, min, max) in TableNumbers)
-            {
-                double value = i < 0 ? 0 : Program.Ini.GetDouble(k.Section, key + i, 0);
-                if (!double.IsFinite(value)) value = 0;
-                if (Ctl(f, editName) is TextBox edit) edit.Text = value.ToString("0.####", CultureInfo.InvariantCulture);
-                if (Ctl(f, spinName) is NumericUpDown spin) spin.Value = (decimal)Math.Clamp(Math.Truncate(value), min, max);
-            }
-            foreach (var (name, key, fallback) in TableAlignments)
-                if (Ctl(f, name) is Control group)
-                    SetRadioIndex(group, Math.Clamp(Program.Ini.GetInt(k.Section, key + i, fallback), 0, 2));
-            foreach (var (name, key, _) in TableInteractions)
-                if (Ctl(f, name) is ComboBox combo)
-                    combo.SelectedIndex = Math.Max(0, combo.Items.IndexOf(Program.Ini.Get(k.Section, key + i) ?? ""));
         }
 
         // ---------- persistenza dal pannello proprietà ----------
@@ -398,52 +282,6 @@ namespace PokerCaption
                 Log("HUD panels " + k.Title + ": visible #" + (i + 1) + " = " + chk.Checked);
             }
             catch (Exception ex) { Log("HUD panels visible ERR: " + ex.Message); }
-        }
-
-        private void PanelFlagChanged(Form f, PanelKind k, string key, bool value, string what)
-        {
-            if (_panelsSync) return;
-            try
-            {
-                int i = SelectedIndex(f, k);
-                if (i < 0) return;
-                SetPanelKey(k, key + i, value ? "1" : "0");
-                PersistPanelField(f, k, i, updateRow: false);
-                Log("HUD panels " + k.Title + ": " + what + " #" + (i + 1) + " = " + value);
-            }
-            catch (Exception ex) { Log("HUD panels flag ERR: " + ex.Message); }
-        }
-
-        /// <summary>Collega un campo intero alla configurazione del pannello.</summary>
-        private void WireInt(Form f, PanelKind k, string ctlName, string key, string what)
-        {
-            if (Ctl(f, ctlName) is TextBox ed)
-                ed.TextChanged += (s, e) =>
-                {
-                    if (_panelsSync) return;
-                    int i = SelectedIndex(f, k);
-                    if (i < 0) return;
-                    if (!int.TryParse(ed.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var v)) return;
-                    SetPanelKey(k, key + i, v.ToString(CultureInfo.InvariantCulture));
-                    PersistPanelField(f, k, i, updateRow: false);
-                };
-            else Log("HUD panels: " + ctlName + " (" + what + ") mancante");
-        }
-
-        /// <summary>TextEdit numerico decimale (es. custom_x/custom_y dei pannelli tavolo).</summary>
-        private void WireDouble(Form f, PanelKind k, string ctlName, string key)
-        {
-            if (Ctl(f, ctlName) is TextBox ed)
-                ed.TextChanged += (s, e) =>
-                {
-                    if (_panelsSync) return;
-                    int i = SelectedIndex(f, k);
-                    if (i < 0) return;
-                    if (!double.TryParse(ed.Text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v)) return;
-                    SetPanelKey(k, key + i, v.ToString("0.####", CultureInfo.InvariantCulture));
-                    PersistPanelField(f, k, i, updateRow: false);
-                };
-            else Log("HUD panels: " + ctlName + " mancante");
         }
 
         /// <summary>Pulsante colore → ColorDialog → chiave <key><i> (BGR).</summary>
@@ -498,23 +336,6 @@ namespace PokerCaption
             catch (Exception ex) { Log("HUD panels font ERR: " + ex.Message); }
         }
 
-        // ---------- radio group (TRadioGroup del builder) ----------
-        private static int RadioIndex(Control rg)
-        {
-            var rbs = rg.Controls.OfType<RadioButton>().OrderBy(r => r.Top).ThenBy(r => r.Left).ToList();
-            for (int i = 0; i < rbs.Count; i++)
-                if (rbs[i].Checked) return i;
-            return 1;
-        }
-
-        private static void SetRadioIndex(Control rg, int idx)
-        {
-            var rbs = rg.Controls.OfType<RadioButton>().OrderBy(r => r.Top).ThenBy(r => r.Left).ToList();
-            for (int i = 0; i < rbs.Count; i++)
-                rbs[i].Checked = i == idx;
-        }
-
-        // ---------- 'Add tag' (dialogo genHudAddTag) ----------
         private void InsertTag(Form f, PanelKind k)
         {
             try
@@ -656,15 +477,11 @@ namespace PokerCaption
             {
                 case "FormatStr": // pannello tabella [HUD]
                     sec["FormatStr" + n] = "";
-                    sec["custom_x" + n] = "10";
-                    sec["custom_y" + n] = "10";
-                    sec["FrameColor" + n] = "0";
                     sec["FVisible" + n] = "1";
                     break;
                 case "plFormatStr": // pannello giocatore [HUD]
                     sec["plFormatStr" + n] = "";
                     sec["plFVisible" + n] = "1";
-                    sec["plFrameColor" + n] = "0";
                     break;
                 default: // item [GenHUD]
                     sec["formatStr" + n] = "";

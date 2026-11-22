@@ -67,13 +67,6 @@ namespace PokerCaption
                 Program.Service.Hud.Load(Program.Ini);      // al cambio ricrea i pannelli col giusto click-through
                 Log("HUD lock = " + UiBinding.IsActive(f, "lockHud"));
             });
-            WireLive("CheckBox72", () =>            // Betscript 'Active' → [PokerCaption] BetscriptOn
-            {
-                Program.Ini.Set("PokerCaption", "BetscriptOn", UiBinding.IsActive(f, "CheckBox72") ? "1" : "0");
-                Program.Service.Betscript.Load(Program.Ini);
-                Log("Betscript active = " + UiBinding.IsActive(f, "CheckBox72"));
-            });
-
             var tabs = (TabControl)Ctl(f, "workspace");
             string pageName = ini.Get("PokerCaption", "ActivePage", "HUD");
             var selected = tabs.TabPages.Cast<TabPage>().FirstOrDefault(page => page.Text == pageName);
@@ -90,7 +83,6 @@ namespace PokerCaption
             // tab Betscript + Options/Table manager/Dialogs: prima del blocco selftest,
             // che può chiudere il form a metà Build (il wiring su form chiuso è rumore)
             AttachBetscript(f);
-            UpdateBetscriptLayoutNotice();
             WireTabs(f);
 
             // Save options salva PokerCaption.ini e conserva il backup .ini_bak.
@@ -261,7 +253,6 @@ namespace PokerCaption
 
         private void RefreshClientIntegration()
         {
-            UpdateBetscriptLayoutNotice();
             Program.Shared.SetMainHwnd(Form.Handle);
             if (_nativeHook == null)
             {
@@ -273,7 +264,7 @@ namespace PokerCaption
             {
                 _wheel?.Dispose();
                 _wheel = null;
-                Log("TM: solo layout; HUD e scansione attivi, statistiche sui pixel visibili, PrintWindow e input automatico sospesi");
+                Log("TM: solo layout; HUD e scansione attivi, statistiche sui pixel visibili, PrintWindow, rotellina e dialoghi automatici sospesi; BetScript su scansione");
             }
             else if (_wheel == null)
             {
@@ -284,16 +275,10 @@ namespace PokerCaption
             Program.Service.RefreshClientWork();
         }
 
-        private void UpdateBetscriptLayoutNotice()
-        {
-            if (Ctl(Form, "BetscriptLayoutNotice") is Label notice)
-                notice.Visible = Program.Service?.Manager.LayoutOnly == true;
-        }
-
         private string BetscriptInfo()
         {
             var n = Program.Ini.GetInt("AdvancedBets", "Count", 0);
-            return $"{n} regole, on={Program.Ini.GetBool("PokerCaption", "BetscriptOn", true)}";
+            return $"{n} regole";
         }
 
         private string PickNativeDll()

@@ -1,30 +1,42 @@
 # PokerCaption
 
-PokerCaption is a Windows desktop utility for arranging poker table windows, displaying an in-session HUD, and tracking session statistics. It also includes optional features that read live table state or interact with the client. This repository contains the desktop application and its native Windows component.
+PokerCaption è un’applicazione desktop Windows per disporre le finestre dei tavoli, mostrare indicatori durante una sessione e compilare il campo dell’importo con formule definite dall’utente. Il repository contiene l’app WinForms, il componente nativo caricato nei processi del client e gli strumenti di compilazione e diagnostica. Questa pagina descrive il comportamento del sorgente per una revisione tecnica e di sicurezza.
 
-## What the application does
+## Funzioni e interazione con il client
 
-| Component | Behavior |
+| Funzione | Dati e comportamento |
 | --- | --- |
-| Table Layout | Detects open table windows and moves or resizes them to configured positions. Layout changes can take effect while the editor is open. |
-| HUD | Displays session totals and available table and player data, including public pot information, player actions, and observed action timings. The timing is derived from captured events and can be absent when events are missing. |
-| BetScript | Evaluates user-configured formulas using available table values and can prefill the amount field. BetScript leaves the final submission to the player. |
-| Mouse wheel and dialog options | Can adjust the amount field, close selected windows, or activate specified dialog buttons when enabled. |
+| **Table Layout** | Rileva le finestre dei tavoli e, quando è abilitato, assegna ai nuovi tavoli il primo slot libero nell’ordine del profilo. Spostare una finestra su uno slot occupato scambia le assegnazioni. Una finestra rilasciata fuori dagli slot rimane dove l’utente l’ha posizionata. Gli slot attivi sono usati solo nei client che li supportano. |
+| **HUD** | Legge i dati riconosciuti nell’interfaccia del tavolo, tra cui piatto, stack visibili, nomi o titoli esposti e azioni. Usa finestre overlay proprie. I tempi visualizzati derivano dai timestamp degli eventi osservati e possono mancare quando la sequenza è incompleta. Il General HUD mostra statistiche di sessione. |
+| **BetScript** | Applica la prima formula utilizzabile per la street corrente. Le formule sono espressioni numeriche del profilo e usano valori disponibili come piatto, buio, stack e importo da chiamare. Il motore compila il campo una volta per turno riconosciuto. La conferma della puntata resta al giocatore. |
+| **Rotellina e dialoghi** | La rotellina può variare l’importo. Le regole abilitate per i dialoghi possono chiudere finestre selezionate o attivare pulsanti specifici. Queste funzioni hanno percorsi distinti da BetScript. |
 
-There is no strategy solver in this application. Reviewers should evaluate the HUD, timing data, and input features against the rules for the intended environment before connecting it to a client.
+BetScript resta disponibile con Table Manager acceso. Sul client renderizzato usa lo stato delle azioni acquisito dalla scansione, richiede dati sufficienti dello stesso turno e rimanda la compilazione finché la finestra si sposta. La scrittura a coordinate richiede il tavolo in primo piano e verifica la finestra che riceverebbe l’input nel punto del campo. Se la formula richiede dati assenti o non applicabili, il motore prova la regola successiva o lascia il campo com’è. La modalità layout del client renderizzato sospende `PrintWindow`, la rotellina e i dialoghi automatici. Restano attivi la scansione nativa, l’HUD, il campionamento di pixel visibili per le statistiche e BetScript.
 
-## Process and data boundaries
+## Processi, privilegi e confini di fiducia
 
-- **Desktop process.** The C# WinForms application enumerates windows, tracks table placement, and renders its own overlay windows. Client interaction can use Windows control messages, screen coordinates, and synthetic input. Depending on the mode, the application can use `PrintWindow` or sample visible pixels.
-- **Native code in the client process.** The normal launch installs Windows message hooks backed by `captionHook.dll`. The native component runs in the target process to inspect runtime UI objects and capture selected UI updates. The x86 build uses the bundled MinHook library. Review the scope of the desktop-wide hook installation separately from the client checks and table selection that determine which windows the application uses.
-- **Local IPC.** The desktop and native components exchange commands and observations through a named Windows shared-memory mapping and Windows messages. Review the mapping's permissions, message handling, and trust assumptions alongside the native code.
-- **Local files.** Configuration, layout profiles, cumulative session statistics, and diagnostic logs are stored beside the executable. Logs can contain client window titles and sampled table text. Use a test profile when reproducing issues. The application does not require a remote service at runtime.
+1. **Applicazione desktop.** L’eseguibile WinForms è x86. Enumera le finestre, identifica i client mediante nomi di processo, classi e titoli, e usa API Win32 per spostamento, overlay e interazione. I percorsi di cattura usano `PrintWindow` o pixel visibili a seconda della modalità. Alcune operazioni usano messaggi Windows, altre input sintetico a coordinate.
+2. **Codice nel processo del client.** L’avvio normale installa hook di messaggistica Windows con `captionHook.dll`. Gli hook hanno portata desktop secondo l’installazione Win32. La selezione dei processi e dei tavoli usati dall’app avviene nei componenti che ricevono ed elaborano gli eventi. Il modulo nativo ispeziona oggetti dell’interfaccia del client renderizzato e acquisisce aggiornamenti selezionati. La build x86 collega MinHook. Il repository compila anche la DLL x64. L’architettura e la versione del client condizionano la compatibilità effettiva.
+3. **Comunicazione locale.** I componenti scambiano comandi e osservazioni tramite una mappatura di memoria denominata nella sessione Windows e messaggi Windows. La mappatura è creata con gli attributi di sicurezza predefiniti del processo. Per la revisione, verificare chi può accedervi e inviare messaggi, la validazione di indici e lunghezze e il comportamento con dati incompleti o alterati. L’applicazione usa processi, finestre e IPC locali per queste funzioni.
+4. **Impatto operativo.** Hook, lettura degli oggetti nella memoria del client, cattura della finestra e input sintetico sono superfici separate. Un aggiornamento del client può rendere incompatibili i controlli, le coordinate o gli oggetti interni attesi. I test locali coprono questi percorsi con fixture. La stabilità e la correttezza sul client reale richiedono una prova separata in un ambiente autorizzato.
 
-On the supported rendered client, enabling Table Manager selects a layout-only mode. It keeps the HUD and native table scans available, switches the session sampler to visible pixels, and suspends BetScript, wheel input, and automatic dialog actions. This mode still uses the native component.
+## Dati su disco e diagnostica
 
-## Review and reproduce locally
+I dati sono salvati accanto all’eseguibile. Il processo deve poter scrivere nella cartella di esecuzione.
 
-Build on Windows with the .NET 8 SDK and Zig on `PATH`. The build produces the desktop executable and native DLLs for x86 and x64. Run the preview or tests from the build directory in an interactive Windows session. Those two entry points work without an open poker client.
+| Percorso | Contenuto e visibilità |
+| --- | --- |
+| `PokerCaption.ini`, `PokerCaption.ini_bak`, `client_profile.ini` | Impostazioni, formule, profilo del client, coordinate ed eventuale copia precedente salvata dall’applicazione. |
+| `TableManagerConfigs/` | Slot e geometrie dei profili locali. Gli scambi fatti trascinando i tavoli riguardano le assegnazioni correnti. Riattivare il manager o un profilo ricrea le assegnazioni. |
+| `global_stats` | Statistiche cumulative di sessione. |
+| `main_log.txt` | Log ricreato all’avvio. Può contenere argomenti di avvio, titoli delle finestre, testo campionato dai tavoli ed errori diagnostici. |
+| `tablesnap/`, `snap_result.txt`, `scan_client.txt` e report di test | Output delle funzioni diagnostiche esplicite. Le acquisizioni possono mostrare informazioni visibili sul tavolo. I report dei test usano invece dati sintetici. |
+
+Trattare log e acquisizioni come dati potenzialmente identificativi. Questa revisione riguarda il codice e la build indicata, con le impostazioni e il profilo effettivamente usati. Verificare la conformità delle singole funzioni alle regole dell’ambiente prima di collegare l’applicazione, incluse le funzioni di temporizzazione e di input automatico.
+
+## Compilazione e verifica riproducibile
+
+Su Windows servono .NET SDK 8, il runtime .NET Desktop 8 x86 per eseguire l’app e Zig disponibile in `PATH`. Dalla radice del repository, in una sessione desktop interattiva:
 
 ```powershell
 .\build.cmd
@@ -33,6 +45,11 @@ Set-Location .\src\PokerCaption\bin\Release\net8.0-windows
 .\PokerCaption.exe --selftest2
 ```
 
-The self-test writes `selftest2.txt` beside the executable. It covers synthetic window placement, HUD rendering and formatting, formula evaluation and the test amount field, and dialog handling with local fixtures. Live-client behavior requires a separate check in an environment authorized for that purpose.
+`--ui-preview` apre l’interfaccia senza collegarsi al client. `--selftest2` usa finestre di prova locali, verifica fra l’altro layout, rendering, formule e dialoghi, e scrive `selftest2.txt`. Per verificare l’esecuzione reale usare un profilo di test, registrare la versione del client e separare le prove di sola disposizione finestre da quelle di acquisizione e di input.
 
-Start the source review at the [desktop entry point](src/PokerCaption/Program.cs), [table service](src/PokerCaption/Engine/TableService.cs), [Windows integration](src/PokerCaption/Native/NativeLayer.cs), and [native component](native/captionHook.c). The [native build script](native/build.ps1) shows which dependencies are linked, including the bundled [MinHook license](native/third_party/minhook/LICENSE.txt).
+## Punti di ingresso per la revisione del codice
+
+- [Avvio, profili e diagnostica](src/PokerCaption/Program.cs) e [servizio tavoli](src/PokerCaption/Engine/TableService.cs).
+- [Hook e IPC Windows](src/PokerCaption/Native/NativeLayer.cs), [componente nativo](native/captionHook.c), [compilazione delle DLL](native/build.ps1) e [licenza MinHook](native/third_party/minhook/LICENSE.txt).
+- [Assegnazione degli slot](src/PokerCaption/Engine/TableManagerEngine.cs), [HUD](src/PokerCaption/Engine/HudEngine.cs) e [storico azioni](src/PokerCaption/Engine/SeatActionHistory.cs).
+- [Formule e precompilazione](src/PokerCaption/Engine/BetScriptEngine.cs), [input a coordinate](src/PokerCaption/Engine/CoordsEngine.cs), [rotellina](src/PokerCaption/Engine/HotkeyEngine.cs) e [dialoghi](src/PokerCaption/Engine/AutoDialogEngine.cs).

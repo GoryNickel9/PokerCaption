@@ -18,20 +18,20 @@ internal static class TableManagerSelfTest
             TableManagerConfig.SeedProfiles(dir);
             var stack = TableManagerConfig.Load(dir, "stack");
             var grid = TableManagerConfig.Load(dir, "3x2");
-            check("TM preset stack and grid", stack.InactiveSlots is [{ Bind: -2, Multislot: true, Height: 461 }] &&
+            check("TM preset stack and grid", stack.InactiveSlots is [{ Multislot: true, Height: 461 }] &&
                 stack.ActiveSlots.Count == 5 && grid.InactiveSlots.Count == 6 &&
                 grid.InactiveSlots[0].EffectiveHeight == 461, "");
 
             var original = TableManagerConfig.ProfilePath(dir, "test");
             File.WriteAllText(original, "[inact]\nleft0=-200\ntop0=20\nwidth0=640\nheight0=455\nbind0=1\nmultislot0=1\nextra0=yes\n" +
-                "[act]\nleft0=10\nwidth0=800\nleft1=900\nwidth1=900\n[options]\nfuture=preserve\n");
+                "[act]\nleft0=900\nwidth0=900\n[options]\nfuture=preserve\n");
             var config = TableManagerConfig.Load(dir, "test");
             config.Save(dir, "test");
             var reloaded = TableManagerConfig.Load(dir, "test");
             var raw = IniFile.Load(original);
-            check("TM round-trip preserves negative coordinates, height, binding and metadata",
-                reloaded.InactiveSlots is [{ Left: -200, Height: 455, Bind: 1, Multislot: true }] &&
-                raw.Get("inact", "extra0") == "yes" &&
+            check("TM round-trip preserves negative coordinates, height and metadata and drops legacy binding",
+                reloaded.InactiveSlots is [{ Left: -200, Height: 455, Multislot: true }] &&
+                raw.Get("inact", "extra0") == "yes" && raw.Get("inact", "bind0") == null &&
                 raw.Get("options", "future") == "preserve", "");
 
             ini.Set("PokerCaption", "TableManagerConfig", "test");
@@ -46,7 +46,7 @@ internal static class TableManagerSelfTest
             var opened = new TableInfo { Hwnd = (IntPtr)9 };
             manager.OnTick(new[] { opened }, 900);
             check("TM offers an active slot immediately when a new table opens", opened.InActiveSlot &&
-                opened.PlacedSlot == 1 && positions[opened.Hwnd].X == 900, "");
+                opened.PlacedSlot == 0 && positions[opened.Hwnd].X == 900, "");
             manager.Load(ini);
             moves = 0;
             var first = new TableInfo { Hwnd = (IntPtr)1, HeroAct = true };
@@ -55,8 +55,8 @@ internal static class TableManagerSelfTest
             TableInfo[] tables = { first, second, third };
             manager.OnTick(tables, 1_000);
             var home = new Rectangle(-200, 20, 640, 455);
-            check("TM binding selects the requested active slot and stacks overflow at home",
-                first.InActiveSlot && first.PlacedSlot == 1 && positions[first.Hwnd].X == 900 &&
+            check("TM uses the first available active slot and stacks overflow at home",
+                first.InActiveSlot && first.PlacedSlot == 0 && positions[first.Hwnd].X == 900 &&
                 !second.InActiveSlot && positions[second.Hwnd] == home && positions[third.Hwnd] == home &&
                 second.TablesInSlot == 2 && third.TablesInSlot == 2, "");
 
@@ -84,7 +84,7 @@ internal static class TableManagerSelfTest
             void Click(string caption) => controls.OfType<Button>().Single(c => c.Text == caption).PerformClick();
 
             check("TM exposes a single home slot list without the retired options or capture button",
-                slots.Items.Count == 1 && !controls.OfType<ComboBox>().Any(c => c.AccessibleName == "Slot type") &&
+                slots.Items.Count == 1 && !controls.OfType<ComboBox>().Any(c => c.AccessibleName is "Slot type" or "Active slot binding") &&
                 !controls.Any(c => c.Text is "Layout options" or "Use open table"), "");
             GeometryField("Left").Value = 950;
             GeometryField("Top").Value = 30;
@@ -95,9 +95,9 @@ internal static class TableManagerSelfTest
                 positions[first.Hwnd] == new Rectangle(950, 30, 850, 620) && first.PlacedSlot == 0 &&
                 positions[second.Hwnd].X == 900 && TableManagerConfig.Load(dir, "test").InactiveSlots[0].Left == -200, "");
             Click("Save and activate");
-            check("TM saves edited home geometry and preserves configured active slots and bindings",
-                manager.Config.InactiveSlots[0] is { Left: 950, Bind: 1 } &&
-                manager.Config.ActiveSlots.Select(slot => slot.Left).SequenceEqual(new[] { 10, 900 }), "");
+            check("TM saves edited home geometry and preserves configured active slots",
+                manager.Config.InactiveSlots[0] is { Left: 950 } &&
+                manager.Config.ActiveSlots.Select(slot => slot.Left).SequenceEqual(new[] { 900 }), "");
 
             Click("Add slot");
             check("TM edit stays local before saving", slots.Items.Count == 2 && manager.Config.InactiveSlots.Count == 1, "");
@@ -141,7 +141,6 @@ internal static class TableManagerSelfTest
 
             windowConfig.InactiveSlots[0].Left += 70;
             windowConfig.InactiveSlots[0].Width += 90;
-            windowConfig.InactiveSlots[0].Bind = 0;
             windowConfig.ActiveSlots.Add(new TableManagerConfig.Slot { Left = expected.X + 150 });
             windowConfig.Save(dir, "native");
             native.RenderedClient = true;
@@ -156,34 +155,34 @@ internal static class TableManagerSelfTest
                 NativeMethods.GetWindowRect(testWindow.Handle, out rect) &&
                 Rectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom) == moved && resizes > 0 &&
                 !rendered.InActiveSlot && native.LayoutOnly, $"actual={testWindow.Bounds}, expected={moved}, resizes={resizes}");
-            testWindow.Location = new Point(moved.X + 25, moved.Y + 20);
-            int resizesBeforeReturn = resizes;
+            native.OnTick(new[] { rendered }, 1150);
+            var freePosition = new Point(moved.Right + 50, moved.Top + 20);
+            testWindow.Location = freePosition;
             native.OnTick(new[] { rendered }, 1250);
             Application.DoEvents();
-            check("TM returns a manually moved window to its assigned slot without resizing again",
-                testWindow.Bounds == moved && resizes == resizesBeforeReturn,
-                $"actual={testWindow.Bounds}, expected={moved}, resizes={resizes - resizesBeforeReturn}");
+            check("TM keeps a window moved outside all slots where the user left it",
+                testWindow.Location == freePosition && rendered.PlacedSlot == -1, "");
 
-            File.WriteAllText(TableManagerConfig.ProfilePath(dir, "sorting"),
-                "[inact]\nleft0=100\nleft1=200\n[options]\nautoSortTables=0\nautoSortTime=100\n");
-            ini.Set("PokerCaption", "TableManagerConfig", "sorting");
+            ini.Set("PokerCaption", "TableManagerConfig", "4x");
+            manager.RenderedClient = true;
             manager.Load(ini);
-            var lower = new TableInfo { Hwnd = (IntPtr)1, Bb = 5, Title = "A" };
-            var higher = new TableInfo { Hwnd = (IntPtr)2, Bb = 10, Title = "B" };
-            TableInfo[] unsorted = { lower, higher };
-            manager.OnTick(unsorted, 1_000);
-            manager.OnTick(unsorted, 1_499);
-            bool waited = positions[lower.Hwnd].X == 100;
-            manager.OnTick(unsorted, 1_500);
-            bool reordered = positions[higher.Hwnd].X == 100;
-            int settledMoves = moves;
-            manager.OnTick(unsorted, 5_000);
-            bool stable = moves == settledMoves;
-            lower.Bb = 10;
-            manager.OnTick(unsorted, 5_010);
-            manager.OnTick(unsorted, 5_510);
-            check("TM always sorts by blinds then title after 500 ms despite legacy settings",
-                waited && reordered && stable && positions[lower.Hwnd].X == 100, "");
+            TableInfo[] four = Enumerable.Range(1, 4).Select(i => new TableInfo { Hwnd = (IntPtr)i, Bb = i }).ToArray();
+            manager.OnTick(four, 2000);
+            var firstSlot = positions[four[0].Hwnd];
+            var fourthSlot = positions[four[3].Hwnd];
+            manager.DropTable(four[0], fourthSlot, firstSlot);
+            manager.OnTick(four, 2100);
+            check("TM swaps the windows in the first and fourth slots",
+                four[0].PlacedSlot == 3 && positions[four[0].Hwnd] == fourthSlot &&
+                four[3].PlacedSlot == 0 && positions[four[3].Hwnd] == firstSlot &&
+                four[1].PlacedSlot == 1 && four[2].PlacedSlot == 2, "");
+
+            var added = new TableInfo { Hwnd = (IntPtr)5, Bb = 100 };
+            four[3].Bb = 99;
+            manager.OnTick([four[0], four[2], four[3], added], 3000);
+            manager.OnTick([four[0], four[2], four[3], added], 6000);
+            check("TM opens a new table in the vacant slot without sorting the others",
+                added.PlacedSlot == 1 && four[0].PlacedSlot == 3 && four[2].PlacedSlot == 2 && four[3].PlacedSlot == 0, "");
         }
         finally { work.Delete(recursive: true); }
     }
