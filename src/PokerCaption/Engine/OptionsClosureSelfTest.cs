@@ -132,6 +132,45 @@ public sealed partial class AutoDialogEngine
                 cancelled && throttled && table.CloseMessages == 2 && !table.Visible && other.Visible, "");
         }
 
+        using (var table = new ClosureTestForm("Closing table"))
+        using (var popup = new ClosureTestForm("Table Closing table"))
+        {
+            table.Show();
+            table.IgnoreClose = true;
+            popup.Show(table);
+            var popupHandle = popup.Handle;
+            windowClasses[popupHandle] = NativeDialogClass;
+            activePopups[table.Handle] = popupHandle;
+            using var leave = new ClosureTestChild(popup, FlutterDialogButtonClass, "Leave Now");
+            using var stay = new ClosureTestChild(popup, FlutterDialogButtonClass, "Keep Playing");
+            engine.SetClosureTables([table.Handle]);
+            engine.ObserveTableEnd(table.Handle);
+            Flush();
+            Application.DoEvents();
+            bool ignoredExistingPopup = table.CloseMessages == 0 && leave.MouseMessages.Count == 0;
+
+            popup.Hide();
+            Flush(100);
+            Application.DoEvents();
+            popup.Text = "Different table";
+            popup.Show(table);
+            Flush(200);
+            Application.DoEvents();
+            bool ignoredWrongTitle = leave.MouseMessages.Count == 0;
+            popup.Text = "Table Closing table";
+            Flush(300);
+            Application.DoEvents();
+            Flush(400);
+            Application.DoEvents();
+            check("Options confirms a matching Leave Now prompt only after its own table close",
+                ignoredExistingPopup && ignoredWrongTitle && table.CloseMessages == 1 &&
+                leave.MouseMessages.Select(message => message.Message)
+                    .SequenceEqual([(int)WmMouseMove, (int)WmLeftButtonDown, (int)WmLeftButtonUp]) &&
+                stay.MouseMessages.Count == 0, "");
+            activePopups.Remove(table.Handle);
+            windowClasses.Remove(popupHandle);
+        }
+
         check("Options dismisses only the insufficient-chips notice with a unique OK button",
             Exercise("Sisal", "OK", FlutterDialogButtonClass, expectClose: false, expectClick: true,
                 otherLabel: "You requested more chips than you\nhave available") &&

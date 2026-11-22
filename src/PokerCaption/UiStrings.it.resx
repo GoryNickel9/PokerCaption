@@ -267,7 +267,6 @@
   <data name="Isolate" xml:space="preserve">
     <value>Isolamento</value>
   </data>
-  <data name="Show" xml:space="preserve"><value>Mostra</value></data>
   <data name="Exit" xml:space="preserve"><value>Esci</value></data>
   <data name="Saved" xml:space="preserve"><value>Salvato</value></data>
   <data name="OPERATORS" xml:space="preserve"><value>OPERATORI</value></data>

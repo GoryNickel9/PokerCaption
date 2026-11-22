@@ -13,7 +13,7 @@ namespace PokerCaption.Engine
     public sealed partial class AutoDialogEngine
     {
         private sealed record DialogAction(string Caption, int DelayMs, bool ClosesTable = false);
-        private sealed record TableCloseRequest(uint ProcessId, long? LastPostTick);
+        private sealed record TableCloseRequest(uint ProcessId, long? LastPostTick, IntPtr ConfirmedPopup = default);
         private sealed record PendingClose(IntPtr Window, uint Owner, string Title, string WindowClass, bool IsDialog, DialogAction Action, long DueTick)
         {
             public string Body { get; init; }
@@ -41,6 +41,7 @@ namespace PokerCaption.Engine
         private const int PollIntervalMs = 100;
         private const int ScanIntervalMs = 500;
         private const int TableCloseRetryMs = 3000;
+        private const int LeaveConfirmationWindowMs = 10000;
         private static readonly Regex Whitespace = new(@"\s+", RegexOptions.CultureInvariant);
 
         // Old [AutoDialog] rows otherwise fall back to generic title matching.
@@ -369,7 +370,7 @@ namespace PokerCaption.Engine
                     if (run != _runRevision || config != _configRevision) return;
                     if (!_pending.Remove(entry) || !matches) continue;
                     if (entry.Action.ClosesTable) ObserveTableEnd(GetWindow(entry.Window, OwnerWindow), entry.Owner);
-                    sent = entry.Button != IntPtr.Zero ? ClickDialogButton(entry) :
+                    sent = entry.Button != IntPtr.Zero ? ClickDialogButton(entry.Button) :
                         NativeMethods.PostMessageW(entry.Window, NativeMethods.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
                 }
                 if (sent)
@@ -378,10 +379,10 @@ namespace PokerCaption.Engine
             FlushTableClosures(tickCount, run, config);
         }
 
-        private static bool ClickDialogButton(PendingClose entry) =>
-            NativeMethods.PostMessageW(entry.Button, WmMouseMove, IntPtr.Zero, ClickPoint) &&
-            NativeMethods.PostMessageW(entry.Button, WmLeftButtonDown, (IntPtr)1, ClickPoint) &&
-            NativeMethods.PostMessageW(entry.Button, WmLeftButtonUp, IntPtr.Zero, ClickPoint);
+        private static bool ClickDialogButton(IntPtr button) =>
+            NativeMethods.PostMessageW(button, WmMouseMove, IntPtr.Zero, ClickPoint) &&
+            NativeMethods.PostMessageW(button, WmLeftButtonDown, (IntPtr)1, ClickPoint) &&
+            NativeMethods.PostMessageW(button, WmLeftButtonUp, IntPtr.Zero, ClickPoint);
 
         internal void ObserveTableEnd(IntPtr table)
         {
@@ -408,16 +409,39 @@ namespace PokerCaption.Engine
                         _tableClosures.Remove(table);
                         continue;
                     }
-                    if (request.LastPostTick is long last && tickCount - last < TableCloseRetryMs) continue;
                     var popup = _lastActivePopup(table);
-                    if (popup != table && NativeMethods.IsWindowVisible(popup) && HasProcess(popup, request.ProcessId)) continue;
+                    if (popup != table && NativeMethods.IsWindowVisible(popup) && HasProcess(popup, request.ProcessId))
+                    {
+                        if (request.LastPostTick is long posted && tickCount - posted <= LeaveConfirmationWindowMs &&
+                            popup != request.ConfirmedPopup && ConfirmTableLeave(table, popup, request.ProcessId))
+                        {
+                            _tableClosures[table] = request with { ConfirmedPopup = popup };
+                            _log("auto-dialog: click 'Leave Now' dopo la richiesta di chiusura del tavolo concluso");
+                        }
+                        continue;
+                    }
+                    if (request.LastPostTick is long last && tickCount - last < TableCloseRetryMs) continue;
                     if (NativeMethods.PostMessageW(table, NativeMethods.WM_CLOSE, IntPtr.Zero, IntPtr.Zero))
                     {
-                        _tableClosures[table] = request with { LastPostTick = tickCount };
+                        _tableClosures[table] = request with { LastPostTick = tickCount, ConfirmedPopup = IntPtr.Zero };
                         _log("auto-dialog: richiesta chiusura del tavolo concluso");
                     }
                 }
             }
+        }
+
+        private bool ConfirmTableLeave(IntPtr table, IntPtr popup, uint processId)
+        {
+            if (GetWindow(popup, OwnerWindow) != table || !IsDialogWindow(popup, processId, _windowClass(popup)))
+                return false;
+            string tableTitle = WindowTitle(table);
+            string popupTitle = WindowTitle(popup);
+            if (tableTitle.Length == 0 ||
+                (popupTitle != tableTitle && popupTitle != "Table " + tableTitle)) return false;
+
+            var leave = FindDialogButton(popup, processId, "Leave Now");
+            return leave != IntPtr.Zero && FindDialogButton(popup, processId, "Keep Playing") != IntPtr.Zero &&
+                ClickDialogButton(leave);
         }
 
         private static bool HasProcess(IntPtr window, uint processId) => window != IntPtr.Zero &&

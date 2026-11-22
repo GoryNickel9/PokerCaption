@@ -273,55 +273,12 @@ namespace PokerCaption
                 Visible = Program.Ini.GetBool("PokerCaption", "MinimizeToTray", true),
             };
             var menu = new ContextMenuStrip();
-            menu.Items.Add(UiLanguage.Text("Show"), null, (s, e) => ShowFromTray());
-            menu.Items.Add("Config INI…", null, (_, _) =>
-            {
-                using var settings = new SettingsForm(Path.Combine(Program.AppDir, "PokerCaption.ini"),
-                    Program.Ini, ApplyAdvancedSettings);
-                settings.ShowDialog(Form);
-            });
-            menu.Items.Add(UiLanguage.Text("Exit"), null, (s, e) => Form.Close());
-            menu.Opening += (_, _) =>
-            {
-                menu.Items[0].Text = UiLanguage.Text("Show");
-                menu.Items[2].Text = UiLanguage.Text("Exit");
-            };
+            var exit = menu.Items.Add(UiLanguage.Text("Exit"), null, (_, _) => Form.Close());
+            menu.Opening += (_, _) => exit.Text = UiLanguage.Text("Exit");
             _tray.ContextMenuStrip = menu;
             _tray.DoubleClick += (s, e) => ShowFromTray();
             Form.HandleCreated += (_, _) => ApplyTrayOption(Program.Ini.GetBool("PokerCaption", "MinimizeToTray", true));
             if (Form.IsHandleCreated) ApplyTrayOption(_tray.Visible);
-        }
-
-        private void ApplyAdvancedSettings(string section)
-        {
-            var ini = Program.Ini;
-            var service = Program.Service;
-            if (section.Equals("AdvancedBets", StringComparison.OrdinalIgnoreCase))
-            {
-                service?.Betscript.Load(ini);
-                RefreshBetList(Form, LoadBetscriptRules());
-            }
-            else if (section.Equals("AutoDialog", StringComparison.OrdinalIgnoreCase))
-            {
-                SyncDialogsFromIni(WorkspacePageByName(Form, "Options") ?? Form);
-                service?.AutoDialog.Load(ini);
-            }
-            else if (section.Equals("HUD", StringComparison.OrdinalIgnoreCase) ||
-                     section.Equals("GenHUD", StringComparison.OrdinalIgnoreCase))
-            {
-                service?.Hud.Load(ini);
-                service?.GenHud.Load(ini);
-                _tabsSync = true;
-                try { UiBinding.Apply(Form, ini, UiBinding.Settings); }
-                finally { _tabsSync = false; }
-            }
-            else if (section.Equals("PokerCaption", StringComparison.OrdinalIgnoreCase) ||
-                     section.Equals("Sisal", StringComparison.OrdinalIgnoreCase))
-            {
-                SyncOptionsFromIni(WorkspacePageByName(Form, "Options"));
-                service?.Load(ini);
-                ApplyTrayOption(ini.GetBool("PokerCaption", "MinimizeToTray", true));
-            }
         }
 
         private void ApplyTrayOption(bool enabled)

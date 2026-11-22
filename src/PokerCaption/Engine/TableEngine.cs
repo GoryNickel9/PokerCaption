@@ -216,6 +216,7 @@ namespace PokerCaption.Engine
             {
                 if (!NativeMethods.IsWindowVisible(h)) return true;
                 var cls = GetClass(h);
+                if (cls == "#32770") return true;
                 NativeMethods.GetWindowThreadProcessId(h, out var pidOwner);
                 var tsb = new StringBuilder(400);
                 NativeMethods.GetWindowTextW(h, tsb, 400);

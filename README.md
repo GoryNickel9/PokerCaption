@@ -2,6 +2,14 @@
 
 PokerCaption è un’applicazione desktop Windows per disporre le finestre dei tavoli, mostrare indicatori durante una sessione e compilare il campo dell’importo con formule definite dall’utente. Il repository contiene l’app WinForms, il componente nativo caricato nei processi del client e gli strumenti di compilazione e diagnostica. Questa pagina descrive il comportamento del sorgente per una revisione tecnica e di sicurezza.
 
+## Installazione su Windows
+
+1. Scarica `PokerCaption-Setup-1.0.0-win-x86.exe` dalla pagina [Release di PokerCaption](https://github.com/GoryNickel9/PokerCaption/releases/latest).
+2. Esegui il setup e apri PokerCaption dal menu Start. Il setup include il runtime .NET Desktop e installa l’app per l’utente corrente in `%LOCALAPPDATA%\Programs\PokerCaption`.
+3. Per aggiornare, chiudi PokerCaption e Sisal prima di eseguire il nuovo setup. L’installazione conserva impostazioni e profili nella cartella dell’app.
+
+Il setup è scaricabile come allegato della release. Il repository contiene il sorgente WinForms, il sorgente delle DLL native e le istruzioni del setup. Il file `.sha256` allegato riporta l’hash del programma di installazione.
+
 ## Funzioni e interazione con il client
 
 | Funzione | Dati e comportamento |
@@ -62,10 +70,10 @@ Le formule supportano operatori aritmetici, parentesi e il suffisso `bb` per esp
 | --- | --- |
 | **Application** | **Minimize to tray** nasconde la finestra principale nell’area di notifica quando viene minimizzata. **Close PokerCaption after the client closes** chiude PokerCaption dopo che l’ultima lobby o finestra tavolo è sparita. La funzione si attiva dopo il primo client rilevato. |
 | **Table preferences** | **Never sit out** è la preferenza unica per cash e tornei. Su Sisal osserva le caselle di sit-out prima della comparsa di **I’m Back**. Se durante il turno la casella del sit-out risulta vuota e il pulsante compare subito dopo senza input dell’utente, tenta il rientro usando la transizione. Una pausa selezionata viene rispettata. Quando la transizione è ambigua, cerca il marcatore `has timed out` per Hero nella cronologia scritta a fine mano. Il pulsante deve essere scoperto. Se il tavolo è in secondo piano, PokerCaption chiede a Windows di attivarlo per il clic e di ripristinare subito dopo la finestra precedente. Se Windows nega l’attivazione, il tentativo viene rimandato. Il cursore torna al punto da cui è partito. La conferma a fine mano richiede la cronologia locale di Sisal. Se attivi **Maximum**, scegli da 1 a 999 tentativi automatici per ciascun tavolo. Il contatore si azzera quando chiudi il relativo tavolo. |
-| **Table closure** | **Automatically close finished tables** chiude il tavolo quando la scansione rileva l’avviso di chiusura o il conto alla rovescia sotto i 15 secondi. Chiude anche il popup di tavolo chiuso e il tavolo associato, se ancora aperto. Funziona in primo e in secondo piano, anche con Table Manager attivo. |
+| **Table closure** | **Automatically close finished tables** chiude il tavolo quando la scansione rileva l’avviso di chiusura o il conto alla rovescia sotto i 15 secondi. Se la richiesta automatica apre la conferma dello stesso tavolo, preme **Leave Now**. Chiude anche il popup di tavolo chiuso e il tavolo associato, se ancora aperto. Funziona in primo e in secondo piano, anche con Table Manager attivo. |
 | **Dialogs** | **Stay connected on inactivity timeout** preme il pulsante per mantenere la connessione quando compare l’avviso di inattività. **Close the insufficient chips notice** preme **OK** nel popup di Sisal con il messaggio “You requested more chips than you have available”. **Close the stack update notice** preme **OK** quando Sisal avvisa che aggiornerà lo stack a fine mano. Le tre opzioni sono disponibili con Table Manager attivo. Per gli avvisi disegnati nel popup il modulo nativo verifica il tipo di finestra e la build di Sisal prima di confrontare il testo. Alla parte gestita passa il tipo di avviso, senza salvare il testo o catturare immagini. |
 
-Le preferenze dei menu vengono salvate quando si modificano e applicate dopo la scrittura, con una copia del file precedente. **Language**, in **Options**, cambia subito la lingua della finestra principale e della configurazione dei simboli. Le formule, i tag e i messaggi ricevuti dal client conservano la loro sintassi. Il programma si apre sempre sulla pagina **HUD**. Nell’area di notifica, **Mostra** riapre la finestra, **Config INI…** apre l’editor locale delle impostazioni e **Esci** chiude l’applicazione.
+Le preferenze dei menu vengono salvate quando si modificano e applicate dopo la scrittura, con una copia del file precedente. **Language**, in **Options**, cambia subito la lingua della finestra principale e della configurazione dei simboli. Le formule, i tag e i messaggi ricevuti dal client conservano la loro sintassi. Il programma si apre sempre sulla pagina **HUD**. Nell’area di notifica il menu contiene solo **Esci** (**Exit** in inglese). Un doppio clic sull’icona riapre la finestra.
 
 ## Processi, privilegi e confini di fiducia
 
