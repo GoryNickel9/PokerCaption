@@ -53,8 +53,9 @@ internal static class DesktopWindow
         work.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         work.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         var title = Heading("HUD", 21, Ink);
+        title.Name = "workspaceHeading";
         work.Controls.Add(title, 0, 0);
-        var pages = new WorkspaceTabs { Name = "workspace", Dock = DockStyle.Fill, Margin = Padding.Empty, TabStop = false };
+        var pages = new WorkspacePages { Name = "workspace", Dock = DockStyle.Fill, Margin = Padding.Empty };
         work.Controls.Add(pages, 0, 1);
         var status = new Label
         {
@@ -64,17 +65,17 @@ internal static class DesktopWindow
         work.Controls.Add(status, 0, 2);
         shell.Controls.Add(work, 1, 0);
 
-        var pagesAndLabels = new (TabPage page, string label)[]
+        var pagesAndLabels = new (Panel page, string label)[]
         {
             (HudPage(), "HUD"),
-            (new TabPage("Table manager") { BackColor = Canvas }, "Table layout"),
+            (WorkspacePage("Table manager"), "Table layout"),
             (BetsPage(), "BetScript"),
             (OptionsPage(), "Options")
         };
         var navButtons = new List<Button>();
         foreach (var (page, label) in pagesAndLabels)
         {
-            pages.TabPages.Add(page);
+            pages.Controls.Add(page);
             var link = Button("", label);
             link.AutoSize = false;
             link.Size = new Size(157, 40);
@@ -84,7 +85,7 @@ internal static class DesktopWindow
             link.ForeColor = Color.White;
             link.FlatAppearance.BorderSize = 0;
             link.FlatAppearance.MouseOverBackColor = Selected;
-            link.Click += (_, _) => pages.SelectedTab = page;
+            link.Click += (_, _) => pages.SelectPage(page);
             navButtons.Add(link);
             links.Controls.Add(link);
         }
@@ -95,14 +96,14 @@ internal static class DesktopWindow
             for (int i = 0; i < navButtons.Count; i++)
                 navButtons[i].BackColor = i == current ? Selected : Rail;
         }
-        pages.SelectedIndexChanged += (_, _) => SyncNavigation();
-        SyncNavigation();
+        pages.PageChanged += (_, _) => SyncNavigation();
+        pages.SelectPage(pagesAndLabels[0].page);
         return form;
     }
 
-    private static TabPage HudPage()
+    private static Panel HudPage()
     {
-        var page = new TabPage("HUD") { BackColor = Canvas };
+        var page = WorkspacePage("HUD");
         var layout = PageLayout();
         page.Controls.Add(layout);
         var toolbar = Row(Check("hudActive", "Table HUD", true), Check("lockHud", "Lock HUD"),
@@ -154,9 +155,9 @@ internal static class DesktopWindow
         return page;
     }
 
-    private static TabPage BetsPage()
+    private static Panel BetsPage()
     {
-        var page = new TabPage("Betscript") { BackColor = Canvas };
+        var page = WorkspacePage("Betscript");
         var split = Columns(282);
         page.Controls.Add(split);
 
@@ -194,9 +195,9 @@ internal static class DesktopWindow
         return page;
     }
 
-    private static TabPage OptionsPage()
+    private static Panel OptionsPage()
     {
-        var page = new TabPage("Options") { BackColor = Canvas };
+        var page = WorkspacePage("Options");
         var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
         page.Controls.Add(scroll);
         var contents = new TableLayoutPanel
@@ -215,13 +216,12 @@ internal static class DesktopWindow
         contents.Controls.Add(Section("Table closure", Check("CheckBox173", "Auto close 'This table has been closed' tables"),
             Check("CheckBox401", "Auto close 'Play at this table has concluded' tables"),
             Check("CheckBox504", "Auto close 'Tournament is over' tables"),
-            Check("CheckBox283", "Close tournament lobby when its last table closes"),
-            Check("CheckBox549", "Auto close table in waiting list")));
+            Check("CheckBox283", "Close tournament lobby when its last table closes")));
 
         var dialogItems = DialogRules.Select(rule => Check(rule.name, $"Close '{rule.caption}'")).ToList();
         foreach (var (name, caption) in new[]
         {
-            ("CheckBox390", "Confirm Waiting List"), ("CheckBox316", "Close Current Session Information"),
+            ("CheckBox316", "Close Current Session Information"),
             ("CheckBox208", "Keep playing in Current Session"), ("CheckBox50", "Stay connected on inactivity timeout")
         }) dialogItems.Add(Check(name, caption));
 
@@ -269,19 +269,14 @@ internal static class DesktopWindow
 
     private static readonly (string name, string caption)[] DialogRules =
     [
-        ("cbCloseMyNews", "My News"), ("cbCloseLogoutInfo", "PokerStars Logout Information"),
-        ("cbStarsAccountInfo", "Stars Account Information"), ("CheckBox532", "Chest Announcement"),
-        ("CheckBox472", "Active Session Reminder"), ("CheckBox421", "Reminder: Your current sesson has been active for X hours"),
-        ("CheckBox477", "Feedback for PokerStars"), ("CheckBox508", "Responsible Gaming"),
+        ("cbCloseLogoutInfo", "PokerStars Logout Information"),
+        ("CheckBox421", "Reminder: Your current sesson has been active for X hours"),
         ("CheckBox506", "You have been successfully removed from all the waiting lists"),
         ("CheckBox500", "You reached the cap of cash game tables"),
         ("CheckBox313", "You are playing at too many tables"),
         ("CheckBox312", "You are currently playing the maximum allowed Zoom tables at once"),
-        ("CheckBox452", "Your auto-rebuy was restricted to"), ("CheckBox327", "table is closed"),
-        ("CheckBox89", "You did not act in time, this seat is no longer reserved for you"),
+        ("CheckBox327", "table is closed"),
         ("CheckBox372", "You have been unregistered from"),
-        ("CheckBox41", "Tournament Registration / Show Lobby"),
-        ("CheckBox63", "Tournament Registration / Welcome to the tournament"),
         ("CheckBox170", "Would you like to register into another Satellite?")
     ];
 
@@ -412,20 +407,30 @@ internal static class DesktopWindow
         return button;
     }
 
-    private sealed class WorkspaceTabs : TabControl
+    internal sealed class WorkspacePages : Panel
     {
-        internal WorkspaceTabs()
-        {
-            Appearance = TabAppearance.FlatButtons;
-            SizeMode = TabSizeMode.Fixed;
-            ItemSize = new Size(0, 1);
-        }
+        internal Control SelectedPage { get; private set; }
+        internal int SelectedIndex => SelectedPage == null ? -1 : Controls.IndexOf(SelectedPage);
+        internal event EventHandler PageChanged;
 
-        protected override void WndProc(ref Message message)
+        internal void SelectPage(Control page)
         {
-            const int adjustTabRectangle = 0x1328;
-            if (message.Msg == adjustTabRectangle) { message.Result = (IntPtr)1; return; }
-            base.WndProc(ref message);
+            if (page == SelectedPage) return;
+            SuspendLayout();
+            try
+            {
+                if (SelectedPage != null) SelectedPage.Visible = false;
+                SelectedPage = page;
+                page.Visible = true;
+            }
+            finally { ResumeLayout(); }
+            PageChanged?.Invoke(this, EventArgs.Empty);
         }
     }
+
+    private static Panel WorkspacePage(string name) =>
+        new() { Name = name, Dock = DockStyle.Fill, BackColor = Canvas, Visible = false };
+
+    internal static WorkspacePages GetWorkspace(Form form) =>
+        (WorkspacePages)form.Controls.Find("workspace", true).Single();
 }

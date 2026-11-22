@@ -11,7 +11,71 @@ PokerCaption è un’applicazione desktop Windows per disporre le finestre dei t
 | **BetScript** | Applica la prima formula utilizzabile per la street corrente. Le formule sono espressioni numeriche del profilo e usano valori disponibili come piatto, buio, stack e importo da chiamare. Il motore compila il campo una volta per turno riconosciuto. La conferma della puntata resta al giocatore. |
 | **Rotellina e dialoghi** | La rotellina può variare l’importo. Le regole abilitate per i dialoghi possono chiudere finestre selezionate o attivare pulsanti specifici. Queste funzioni hanno percorsi distinti da BetScript. |
 
-BetScript resta disponibile con Table Manager acceso. Sul client renderizzato usa lo stato delle azioni acquisito dalla scansione, richiede dati sufficienti dello stesso turno e rimanda la compilazione finché la finestra si sposta. La scrittura a coordinate richiede il tavolo in primo piano e verifica la finestra che riceverebbe l’input nel punto del campo. Se la formula richiede dati assenti o non applicabili, il motore prova la regola successiva o lascia il campo com’è. La modalità layout del client renderizzato sospende `PrintWindow`, la rotellina e i dialoghi automatici. Restano attivi la scansione nativa, l’HUD, il campionamento di pixel visibili per le statistiche e BetScript.
+BetScript resta disponibile con Table Manager acceso. Sul client renderizzato usa lo stato delle azioni acquisito dalla scansione, richiede dati sufficienti dello stesso turno e rimanda la compilazione finché la finestra si sposta. La scrittura a coordinate parte quando lo stesso tavolo è in primo piano e sotto il cursore. Verifica che il campo sia scoperto, quindi accoda la selezione del campo e il ripristino della posizione del mouse come un’unica sequenza. Se il primo piano cambia prima di digitare, rimanda la compilazione. Se la formula richiede dati assenti o non applicabili, il motore prova la regola successiva o lascia il campo com’è. La modalità layout del client renderizzato sospende `PrintWindow`, la rotellina e i dialoghi automatici. Restano attivi la scansione nativa, l’HUD, il campionamento di pixel visibili per le statistiche e BetScript.
+
+## Architettura e flusso dei dati
+
+| Livello | Responsabilità |
+| --- | --- |
+| **Interfaccia WinForms** | `Program` carica il profilo e la configurazione, inizializza una sola istanza dell’app e avvia `MainUiController`. `DesktopWindow` costruisce i menu. Il controller collega i controlli ai valori INI, aggiorna gli overlay e gestisce la chiusura. |
+| **Servizio tavoli** | `TableService` enumera le finestre del client, associa una finestra a ogni tavolo e richiede scansioni. Ricava tipo di gioco e bui dal titolo. Collega le osservazioni più recenti a `TableInfo` e mantiene contatori di turno e di mano. Il timer WinForms aggiorna l’interfaccia. Un thread separato campiona i pixel per rilevare se Hero è in mano. |
+| **Modulo nativo** | `captionHook.dll` osserva gli aggiornamenti di testo e visibilità e legge etichette e posizioni dei nodi visibili nel client renderizzato. Associa le azioni ai posti e conserva una coda circolare numerata con timestamp. Le scansioni pubblicano anche piatto, stack, numero di carte sul board, il posto identificato dal nome di Hero e la presenza di un controllo per impostare un importo. |
+| **Motori** | `SeatActionHistory` combina gli eventi acquisiti con le etichette ancora visibili, evitando i duplicati. `HudTags` risolve i formati e `HudEngine` e `GenHud` disegnano overlay separati. `SessionStats` conserva tempo attivo e mani. `TableManagerEngine` gestisce le coordinate delle finestre. `BetScriptEngine` valuta le formule. `AutoDialogEngine` e `HotkeyEngine` gestiscono rispettivamente dialoghi e rotellina. |
+| **Persistenza e input** | `IniFile` legge e salva le configurazioni. `TableManagerConfig` legge e scrive i profili degli slot. `Input` e `CoordsEngine` traducono gli aggiornamenti del campo importo in operazioni sui controlli Windows o in input sintetico sul tavolo renderizzato. |
+
+Ogni aggiornamento dell’HUD usa i dati già acquisiti. Nell’architettura Win32, la finestra del tavolo e i pannelli HUD sono finestre distinte. Il parser di BetScript lavora in chip e converte il risultato per i campi visualizzati in BB. Il caso verificato sul client è Hold’em 100/200 Play Money con Table Manager acceso. La copertura delle altre varianti e dei diversi ridimensionamenti va verificata separatamente.
+
+## Menu e controlli
+
+### HUD
+
+| Controllo | Comportamento |
+| --- | --- |
+| **Table HUD** | Abilita o disabilita gli overlay dei pannelli tavolo e giocatore. **Lock HUD** blocca il trascinamento dei pannelli giocatore. I pannelli tavolo sono già disposti automaticamente in colonna. |
+| **General HUD** | Mostra o nasconde l’overlay di sessione. **Lock General HUD** blocca il trascinamento dell’intero overlay. Quando è sbloccato, l’ultima posizione viene salvata. |
+| **Table panels** | Mostra dati del tavolo in una colonna centrata nella parte alta. **Format** combina testo e tag. **Insert tag** propone importo da chiamare in BB, pot odds in percentuale e generatore casuale. **Visible** controlla la visibilità del singolo pannello e **Text colour** il colore. |
+| **Player panels** | Mostra i formati vicino ai posti. **Insert tag** propone `[actions]`, che mostra le azioni avversarie per street. Hero è escluso dallo storico visualizzato. **Visible** e **Text colour** agiscono sul pannello selezionato. Un pannello giocatore sbloccato può essere spostato per posto. |
+| **General HUD panels** | **Format** e **Insert tag** permettono di inserire testo, numero di mani, tempo di sessione e mani per ora. **Text colour**, **Font** e **Background** controllano l’aspetto. Quando l’overlay generale è attivo, tutte le righe sono visibili, centrate e con sfondo opaco. |
+| **Azioni sulle liste** | **Add** crea un pannello, **Delete** rimuove il selezionato e **Up / Down** cambia l’ordine. **Duplicate** duplica un pannello tavolo o giocatore. Nel selettore di tag, **Filter tags** restringe la lista, **Insert** inserisce il tag al cursore e **Cancel** chiude il selettore. |
+| **Action symbols** | La colonna **Action** identifica l’azione. **Symbol** cambia il testo mostrato, compreso il separatore fra street. **Add timings** aggiunge i secondi accanto alle azioni con timestamp osservabile. **Apply** salva e lascia aperto il dialogo, **Ok** salva e chiude, **Cancel** scarta le modifiche successive all’ultimo salvataggio. |
+
+Un’azione può avere un simbolo senza durata se è stata recuperata da un’etichetta visibile. Lo storico parte dalle osservazioni disponibili: le azioni già scomparse prima della lettura non possono essere ricostruite. Il menu contestuale del General HUD permette di azzerare il tempo, le mani della sessione o tutti i tag di sessione. `[handsPerHour]` si aggiorna a ogni nuova mano registrata usando il tempo attivo accumulato e resta fermo tra le mani. Fino a quando il tempo attivo è zero mostra `0`. I reset di tempo o mani azzerano anche il valore derivato.
+
+### Table Layout
+
+| Controllo | Comportamento |
+| --- | --- |
+| **Enable Table Manager** | Abilita l’assegnazione e il ridimensionamento delle finestre. I nuovi tavoli prendono il primo slot libero. Quando tutti gli slot sono occupati, il nuovo tavolo resta nella posizione scelta dal client finché si libera uno slot. Un trascinamento su uno slot occupato scambia le assegnazioni. Un tavolo rilasciato fuori dagli slot resta libero. Nei client compatibili i nuovi tavoli possono usare gli slot attivi già definiti nel profilo. |
+| **Layout**, **New**, **Duplicate**, **Delete** | Selezionano il profilo da modificare, ne creano uno vuoto, duplicano quello selezionato o lo eliminano dopo conferma. La scelta nella lista prepara la modifica. **Save and activate** salva il profilo e lo rende quello in uso. |
+| **Add slot**, **Up**, **Down**, **Remove** | Creano uno slot base, cambiano la priorità di assegnazione o rimuovono lo slot selezionato. |
+| **Slot geometry** | **Left** e **Top** sono coordinate del desktop. **Width** e **Height** sono le dimensioni in pixel. `-1` in **Height** calcola l’altezza automaticamente. La geometria degli slot già assegnati nel profilo attivo si può provare prima del salvataggio. Se Sisal mantiene le proprie proporzioni e supera un’altezza esplicita, il manager prova una larghezza più piccola per rientrare nello spazio. Il client può imporre una misura minima. |
+
+### BetScript
+
+**Add rule** crea una formula, **Duplicate** ne copia i campi, **Delete** elimina la selezione e **Move up / Move down** cambia l’ordine di valutazione. **Formula** contiene l’espressione numerica, il pulsante **?** apre la guida e **Streets** sceglie su quali fasi può essere applicata. **Round to (% of BB)** arrotonda al passo indicato in percentuale del buio. **Shove above (% of stack)** usa lo stack completo oltre la soglia, quando il totale è determinabile. La precompilazione può essere regolata lasciando vuota la lista delle regole o rimuovendo una street dalle regole. Il pulsante di conferma della puntata resta sotto il controllo del giocatore.
+
+Le formule supportano operatori aritmetici, parentesi e il suffisso `bb` per esprimere un valore in grandi bui. `pot` è il piatto corrente, `spot` il piatto a inizio street, `ante` l’ante per giocatore e `antes` il totale degli ante. `bet` indica l’importo da pareggiare, `raise` l’ultima puntata o rilancio osservato, `hbet` il contributo di Hero nella street e `call` quanto serve per chiamare. `stack`, `effStack`, `betbox`, `sb` e `bb` indicano stack, stack effettivo, campo importo e bui. Alcuni valori dipendono dal client e dallo stato della mano. Per esempio `pot * 0.5` calcola metà piatto e `3.5bb` indica 3,5 grandi bui. `@0`–`@15` imposta il numero di decimali, con predefinito `2`, e `@H` lascia invariato il testo nel campo.
+
+### Options
+
+| Gruppo | Controlli |
+| --- | --- |
+| **Application** | **Minimize to tray** nasconde la finestra principale nell’area di notifica quando viene minimizzata. **Close PokerCaption after the last client closes** chiude PokerCaption dopo che l’ultima lobby o finestra tavolo è sparita. La funzione si attiva dopo il primo client rilevato. |
+| **Table preferences** | **Never sit out on cash tables**, **Maximum** con il valore numerico e **Never sit out on tournament tables** appaiono disabilitati in questa build. |
+| **Table closure** | I tre **Auto close** chiudono rispettivamente il tavolo segnato come chiuso, il tavolo su cui il gioco è terminato e il tavolo quando il torneo è finito. **Close tournament lobby when its last table closes** chiude la lobby del torneo identificato quando il suo ultimo tavolo viene chiuso. |
+
+In **Dialogs** ogni voce lavora sul dialogo riconosciuto. Le opzioni di chiusura hanno questi ambiti.
+
+| Voci | Risultato |
+| --- | --- |
+| **Logout Information** | Chiude la finestra delle informazioni di uscita. |
+| **Reminder: Your current sesson has been active for X hours** | Chiude il promemoria con la durata della sessione quando riconosce il testo. |
+| **You have been successfully removed from all the waiting lists**, **You reached the cap of cash game tables**, **You are playing at too many tables**, **You are currently playing the maximum allowed Zoom tables at once** | Chiudono, nell’ordine, la conferma di rimozione dalle liste d’attesa e i tre avvisi sui limiti di tavoli. |
+| **table is closed**, **You have been unregistered from** | Chiudono i dialoghi di tavolo chiuso e cancellazione dell’iscrizione. |
+| **Would you like to register into another Satellite?** | Chiude l’invito a iscriversi a un altro satellite. |
+| **Close Current Session Information**, **Keep playing in Current Session**, **Stay connected on inactivity timeout** | Attivano rispettivamente i pulsanti di chiusura della scheda informativa, prosecuzione della sessione e mantenimento della connessione. |
+
+Le azioni sui dialoghi dipendono dal titolo, dal testo o dalla struttura del dialogo riconosciuto. Sul client renderizzato sono sospese mentre Table Manager è attivo. **Save settings**, nella barra laterale, salva le impostazioni e conserva una copia del file precedente. Nell’area di notifica, **Mostra** riapre la finestra, **Config INI…** apre l’editor locale delle impostazioni e **Esci** chiude l’applicazione.
 
 ## Processi, privilegi e confini di fiducia
 

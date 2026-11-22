@@ -22,6 +22,7 @@ namespace PokerCaption.Engine
         public double Sb, Bb;
         public string Currency = "$";
         public double Pot, Bet, Stack;
+        internal bool BetBoxInBb;
         public double? AmountToCall;
         public readonly Dictionary<int, double> SeatStacks = new();
         public readonly Dictionary<int, System.Drawing.Rectangle> SeatBounds = new();
@@ -41,6 +42,7 @@ namespace PokerCaption.Engine
         // --- Sisal / client renderizzato (dal titolo finestra) ---
         public string HeroNick = "";          // "Logged In as <nick>"
         internal int HeroSeat;
+        internal int ConfirmedHeroSeat;
         public double Ante;
         public bool IsPlayMoney;
         public bool ShortDeck;                // variante "6+"
@@ -137,6 +139,18 @@ namespace PokerCaption.Engine
                     t.Currency = "";
                     t.Sb = ParseMoney(m.Groups[1].Value);
                     t.Bb = ParseMoney(m.Groups[2].Value);
+                }
+                else if (t.IsPlayMoney && !t.ShortDeck)
+                {
+                    m = System.Text.RegularExpressions.Regex.Match(s,
+                        @"(?<![\d.,])([\d.,]+)\s*/\s*([\d.,]+)\s+Play Money\b",
+                        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    if (m.Success)
+                    {
+                        t.Currency = "";
+                        t.Sb = ParseMoney(m.Groups[1].Value);
+                        t.Bb = ParseMoney(m.Groups[2].Value);
+                    }
                 }
             }
 

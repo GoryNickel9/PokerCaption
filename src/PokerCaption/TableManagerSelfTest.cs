@@ -18,7 +18,7 @@ internal static class TableManagerSelfTest
             TableManagerConfig.SeedProfiles(dir);
             var stack = TableManagerConfig.Load(dir, "stack");
             var grid = TableManagerConfig.Load(dir, "3x2");
-            check("TM preset stack and grid", stack.InactiveSlots is [{ Multislot: true, Height: 461 }] &&
+            check("TM preset stack and grid", stack.InactiveSlots is [{ Height: 461 }] &&
                 stack.ActiveSlots.Count == 5 && grid.InactiveSlots.Count == 6 &&
                 grid.InactiveSlots[0].EffectiveHeight == 461, "");
 
@@ -29,9 +29,9 @@ internal static class TableManagerSelfTest
             config.Save(dir, "test");
             var reloaded = TableManagerConfig.Load(dir, "test");
             var raw = IniFile.Load(original);
-            check("TM round-trip preserves negative coordinates, height and metadata and drops legacy binding",
-                reloaded.InactiveSlots is [{ Left: -200, Height: 455, Multislot: true }] &&
-                raw.Get("inact", "extra0") == "yes" && raw.Get("inact", "bind0") == null &&
+            check("TM round-trip preserves negative coordinates, height and metadata and drops retired slot settings",
+                reloaded.InactiveSlots is [{ Left: -200, Height: 455 }] &&
+                raw.Get("inact", "extra0") == "yes" && raw.Get("inact", "bind0") == null && raw.Get("inact", "multislot0") == null &&
                 raw.Get("options", "future") == "preserve", "");
 
             ini.Set("PokerCaption", "TableManagerConfig", "test");
@@ -55,22 +55,22 @@ internal static class TableManagerSelfTest
             TableInfo[] tables = { first, second, third };
             manager.OnTick(tables, 1_000);
             var home = new Rectangle(-200, 20, 640, 455);
-            check("TM uses the first available active slot and stacks overflow at home",
+            check("TM reserves the home of the active table and leaves overflow unplaced",
                 first.InActiveSlot && first.PlacedSlot == 0 && positions[first.Hwnd].X == 900 &&
-                !second.InActiveSlot && positions[second.Hwnd] == home && positions[third.Hwnd] == home &&
-                second.TablesInSlot == 2 && third.TablesInSlot == 2, "");
+                !second.InActiveSlot && second.PlacedSlot < 0 && !positions.ContainsKey(second.Hwnd) &&
+                third.PlacedSlot < 0 && !positions.ContainsKey(third.Hwnd), "");
 
             first.HeroAct = false;
             first.Locked = true;
             manager.OnTick(tables, 1_010);
             check("TM locked table reserves its active slot and avoids redundant moves",
-                first.InActiveSlot && !second.InActiveSlot && moves == 3, "");
+                first.InActiveSlot && !second.InActiveSlot && moves == 1, "");
 
             first.Locked = false;
             manager.OnTick(tables, 1_020);
             check("TM frees active slot and returns table to its previous home",
                 !first.InActiveSlot && positions[first.Hwnd] == home && second.InActiveSlot &&
-                positions[second.Hwnd].X == 900 && moves == 5, "");
+                positions[second.Hwnd].X == 900 && moves == 3, "");
 
             using var form = new Form { ClientSize = new Size(790, 550), ShowInTaskbar = false };
             var panel = new TableManagerPanel(manager, ini);
@@ -85,7 +85,7 @@ internal static class TableManagerSelfTest
 
             check("TM exposes a single home slot list without the retired options or capture button",
                 slots.Items.Count == 1 && !controls.OfType<ComboBox>().Any(c => c.AccessibleName is "Slot type" or "Active slot binding") &&
-                !controls.Any(c => c.Text is "Layout options" or "Use open table"), "");
+                !controls.Any(c => c.Text is "Layout options" or "Use open table" or "Allow multiple tables in this slot"), "");
             GeometryField("Left").Value = 950;
             GeometryField("Top").Value = 30;
             GeometryField("Width").Value = 850;
@@ -139,6 +139,58 @@ internal static class TableManagerSelfTest
                 Rectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom) == expected,
                 $"actual={testWindow.Bounds}, expected={expected}, state={testWindow.WindowState}");
 
+            var shortSlot = new Rectangle(expected.Location, new Size(400, 200));
+            using (var proportionalWindow = new Form
+            {
+                StartPosition = FormStartPosition.Manual, ShowInTaskbar = false,
+                Bounds = new Rectangle(expected.Location, new Size(480, 360))
+            })
+            {
+                proportionalWindow.Resize += (_, _) =>
+                {
+                    int proportionalHeight = proportionalWindow.Width * 3 / 4;
+                    if (proportionalWindow.Height != proportionalHeight) proportionalWindow.Height = proportionalHeight;
+                };
+                proportionalWindow.Show();
+                Application.DoEvents();
+                var layout = new TableManagerEngine(null) { ConfigDir = dir, RenderedClient = true };
+                layout.Load(ini);
+                layout.PreviewGeometry(0, new TableManagerConfig.Slot
+                {
+                    Left = shortSlot.Left, Top = shortSlot.Top, Width = shortSlot.Width, Height = shortSlot.Height
+                });
+                var proportionalTable = new TableInfo { Hwnd = proportionalWindow.Handle };
+                layout.OnTick([proportionalTable], 1000);
+                Application.DoEvents();
+                int firstHeight = proportionalWindow.Height;
+                layout.OnTick([proportionalTable], 1200);
+                Application.DoEvents();
+                layout.OnTick([proportionalTable], 1400);
+                check("TM fits an aspect-constrained window after reading the actual height",
+                    firstHeight == 300 && proportionalWindow.Width == 266 && proportionalWindow.Height <= shortSlot.Height &&
+                    proportionalTable.PlacedSlot == 0,
+                    $"first height={firstHeight}, final size={proportionalWindow.Size}");
+            }
+            check("TM scales width only when the client enforces a height larger than the explicit slot",
+                TableManagerEngine.FitWithinHeight(shortSlot, expected) ==
+                    new Rectangle(expected.Location, new Size(266, 200)) &&
+                TableManagerEngine.FitWithinHeight(expected, expected) == null &&
+                TableManagerEngine.FitWithinHeight(shortSlot, new Rectangle(0, 0, 401, 300)) == null, "");
+
+            int heightOnly = expected.Height + 30;
+            var direct = new TableInfo { Hwnd = testWindow.Handle };
+            native.Load(ini);
+            native.OnTick([direct], 250);
+            native.PreviewGeometry(0, new TableManagerConfig.Slot
+            {
+                Left = expected.Left, Top = expected.Top, Width = expected.Width, Height = heightOnly
+            });
+            native.OnTick([direct], 400);
+            Application.DoEvents();
+            check("TM applies a Height-only preview without saving or changing width",
+                testWindow.Bounds == new Rectangle(expected.Location, new Size(expected.Width, heightOnly)) &&
+                TableManagerConfig.Load(dir, "native").InactiveSlots[0].Height == expected.Height, "");
+
             windowConfig.InactiveSlots[0].Left += 70;
             windowConfig.InactiveSlots[0].Width += 90;
             windowConfig.ActiveSlots.Add(new TableManagerConfig.Slot { Left = expected.X + 150 });
@@ -178,6 +230,9 @@ internal static class TableManagerSelfTest
                 four[1].PlacedSlot == 1 && four[2].PlacedSlot == 2, "");
 
             var added = new TableInfo { Hwnd = (IntPtr)5, Bb = 100 };
+            manager.OnTick([.. four, added], 2200);
+            check("TM leaves a fifth table untouched while four slots are occupied",
+                added.PlacedSlot < 0 && !positions.ContainsKey(added.Hwnd), "");
             four[3].Bb = 99;
             manager.OnTick([four[0], four[2], four[3], added], 3000);
             manager.OnTick([four[0], four[2], four[3], added], 6000);

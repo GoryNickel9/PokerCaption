@@ -51,37 +51,90 @@ namespace PokerCaption.Engine
         }
 
         /// <summary>Sostituisce il testo nel campo selezionato.</summary>
-        public static bool TypeInto(IntPtr hwnd, double nx, double ny, string text)
+        public static bool TypeInto(IntPtr hwnd, double nx, double ny, string text, bool foregroundOnly = false)
         {
-            if (!Click(hwnd, nx, ny)) return false;
+            if (foregroundOnly ? !FocusBetBox(hwnd, nx, ny) : !Click(hwnd, nx, ny)) return false;
             Thread.Sleep(50);
-            if (NativeMethods.GetForegroundWindow() != hwnd || IsHungAppWindow(hwnd)) return false;
-            SendKey(0xA2, true);  // Ctrl down
-            SendKey(0x41, true);  // A
-            SendKey(0x41, false);
-            SendKey(0xA2, false); // Ctrl up
-            foreach (var ch in text) SendChar(ch);
-            return true;
+            if (NativeMethods.GetForegroundWindow() != hwnd || IsHungAppWindow(hwnd) || NativeMethods.IsInMoveSize(hwnd) ||
+                (foregroundOnly && (!NativeMethods.GetCursorPos(out var cursor) || !OwnsPoint(hwnd, cursor))))
+                return false;
+            const ushort endScan = 0x4F, backspaceScan = 0x0E;
+            const uint extendedKey = 1, keyUp = 2, unicode = 4, scanCode = 8;
+            const int maximumAmountLength = 16;
+            // The rendered client uses scan codes for editing keys and Unicode events for digits.
+            var inputs = new List<INPUT>(2 + maximumAmountLength * 2 + text.Length * 2)
+            { Keyboard(endScan, scanCode | extendedKey), Keyboard(endScan, scanCode | extendedKey | keyUp) };
+            for (int i = 0; i < maximumAmountLength; i++)
+            {
+                inputs.Add(Keyboard(backspaceScan, scanCode));
+                inputs.Add(Keyboard(backspaceScan, scanCode | keyUp));
+            }
+            foreach (char ch in text)
+            {
+                inputs.Add(Keyboard(scan: ch, flags: unicode));
+                inputs.Add(Keyboard(scan: ch, flags: unicode | keyUp));
+            }
+            uint sent = SendInput((uint)inputs.Count, inputs.ToArray(), INPUT.Size);
+            if (sent == inputs.Count) return true;
+            if (sent % 2 != 0)
+                SendInput(1, [inputs[(int)sent]], INPUT.Size);
+            return false;
         }
 
-        private static void SendChar(char c)
+        private static bool FocusBetBox(IntPtr hwnd, double nx, double ny)
         {
-            var down = new INPUT { type = 1 }; // INPUT_KEYBOARD
-            down.U.ki.wScan = c;
-            down.U.ki.dwFlags = 0x0004;       // KEYEVENTF_UNICODE
-            var up = down;
-            up.U.ki.dwFlags = 0x0004 | 0x0002; // | KEYEVENTF_KEYUP
-            var arr = new INPUT[] { down, up };
-            SendInput(2, arr, Marshal.SizeOf<INPUT>());
+            if (!TryPoint(hwnd, nx, ny, out var point, foregroundOnly: true) ||
+                !NativeMethods.GetCursorPos(out var original) || !OwnsPoint(hwnd, original) ||
+                NativeMethods.GetForegroundWindow() != hwnd || NativeMethods.IsInMoveSize(hwnd))
+                return false;
+
+            // Queue focus and restoration together. A physical input event cannot enter the batch.
+            var screen = SystemInformation.VirtualScreen;
+            INPUT[] inputs =
+            [
+                MouseMove(point, screen),
+                MouseButton(MOUSEEVENTF_LEFTDOWN),
+                MouseButton(MOUSEEVENTF_LEFTUP),
+                MouseMove(original, screen),
+            ];
+            if (NativeMethods.GetForegroundWindow() != hwnd || !OwnsPoint(hwnd, point) ||
+                !NativeMethods.GetCursorPos(out var current) || current.X != original.X || current.Y != original.Y)
+                return false;
+            uint sent = SendInput((uint)inputs.Length, inputs, INPUT.Size);
+            if (sent == inputs.Length) return true;
+            if (sent == 2) SendInput(1, [inputs[2]], INPUT.Size);
+            if (sent > 0) RestoreCursor(point, original);
+            return false;
         }
 
-        private static void SendKey(uint vk, bool down)
+        private static INPUT MouseMove(NativeMethods.POINT point, Rectangle screen)
         {
-            var inp = new INPUT { type = 1 };
-            inp.U.ki.wVk = (ushort)vk;
-            inp.U.ki.dwFlags = down ? 0u : 0x0002;
-            SendInput(1, new INPUT[] { inp }, Marshal.SizeOf<INPUT>());
+            const uint absoluteVirtualMove = 0xE001; // ABSOLUTE | VIRTUALDESK | MOVE_NOCOALESCE | MOVE
+            return new INPUT
+            {
+                U = new InputUnion
+                {
+                    mi = new MOUSEINPUT
+                    {
+                        dx = NormalizeMouseCoordinate(point.X, screen.Left, screen.Width),
+                        dy = NormalizeMouseCoordinate(point.Y, screen.Top, screen.Height),
+                        dwFlags = absoluteVirtualMove
+                    }
+                }
+            };
         }
+
+        internal static int NormalizeMouseCoordinate(int point, int origin, int extent) =>
+            (int)Math.Clamp(((long)(point - origin) * 65536 + extent - 1) / extent, 0, 65535);
+
+        private static INPUT MouseButton(uint flags) =>
+            new() { U = new InputUnion { mi = new MOUSEINPUT { dwFlags = flags } } };
+
+        private static INPUT Keyboard(ushort scan, uint flags) => new()
+        {
+            type = 1,
+            U = new InputUnion { ki = new KEYBDINPUT { wScan = scan, dwFlags = flags } }
+        };
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
@@ -107,15 +160,22 @@ namespace PokerCaption.Engine
         [StructLayout(LayoutKind.Sequential)]
         private struct KEYBDINPUT { public ushort wVk, wScan; public uint dwFlags, time; public UIntPtr extraInfo; }
 
-        private static bool TryPoint(IntPtr hwnd, double nx, double ny, out NativeMethods.POINT point)
+        private static bool TryPoint(IntPtr hwnd, double nx, double ny, out NativeMethods.POINT point, bool foregroundOnly = false)
         {
             point = default;
             if (hwnd == IntPtr.Zero || !NativeMethods.IsWindow(hwnd) || IsHungAppWindow(hwnd)) return false;
-            if (IsIconic(hwnd)) ShowWindowAsync(hwnd, 9); // SW_RESTORE
-            if (NativeMethods.GetForegroundWindow() != hwnd)
+            if (foregroundOnly)
             {
-                if (!SetForegroundWindow(hwnd)) return false;
-                Thread.Sleep(60);
+                if (IsIconic(hwnd)) return false;
+            }
+            else
+            {
+                if (IsIconic(hwnd)) ShowWindowAsync(hwnd, 9); // SW_RESTORE
+                if (NativeMethods.GetForegroundWindow() != hwnd)
+                {
+                    if (!SetForegroundWindow(hwnd)) return false;
+                    Thread.Sleep(60);
+                }
             }
             if (NativeMethods.GetForegroundWindow() != hwnd ||
                 !NativeMethods.GetWindowRect(hwnd, out var rect)) return false;
@@ -123,6 +183,11 @@ namespace PokerCaption.Engine
             if (width <= 0 || height <= 0) return false;
             point.X = rect.Left + (int)(nx * width);
             point.Y = rect.Top + (int)(ny * height);
+            return OwnsPoint(hwnd, point);
+        }
+
+        private static bool OwnsPoint(IntPtr hwnd, NativeMethods.POINT point)
+        {
             var target = NativeMethods.WindowFromPoint(point);
             return target == hwnd || NativeMethods.IsChild(hwnd, target);
         }

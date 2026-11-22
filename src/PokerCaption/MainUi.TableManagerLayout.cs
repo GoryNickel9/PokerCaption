@@ -19,7 +19,7 @@ public sealed partial class MainUiController
     internal static TableManagerPanel AttachTableManager(Form form, TableManagerEngine manager,
         IniFile ini)
     {
-        var page = TabPageByName(form, "Table manager");
+        var page = WorkspacePageByName(form, "Table manager");
         if (page == null) return null;
         foreach (var control in page.Controls.Cast<Control>().ToArray()) control.Dispose();
         var panel = new TableManagerPanel(manager, ini);
@@ -42,7 +42,6 @@ internal sealed class TableManagerPanel : Panel
     private readonly NumericUpDown _top = Number(int.MinValue, int.MaxValue);
     private readonly NumericUpDown _width = Number(1, int.MaxValue);
     private readonly NumericUpDown _height = Number(-1, int.MaxValue);
-    private readonly CheckBox _stack = new() { Text = "Allow multiple tables in this slot", AutoSize = true };
     private readonly Label _status = new() { AutoSize = true };
     private readonly Button _duplicate;
     private readonly Button _delete;
@@ -82,14 +81,12 @@ internal sealed class TableManagerPanel : Panel
         _down = ButtonAt(slotPanel, "Down", 94, 316, 87, () => Reorder(1));
         _remove = ButtonAt(slotPanel, "Remove", 187, 316, 71, RemoveSlot);
 
-        Put(slotPanel, _geometry, 269, 60, 190, 283);
+        Put(slotPanel, _geometry, 269, 60, 190, 151);
         Field(_geometry, "Left", _left, 13, 22, 75);
         Field(_geometry, "Top", _top, 99, 22, 75);
         Field(_geometry, "Width", _width, 13, 75, 75);
         Field(_geometry, "Height", _height, 99, 75, 75);
         LabelAt(_geometry, "Use −1 for automatic height", 13, 121);
-        Put(_geometry, _stack, 13, 156, 162, 45);
-        _stack.AutoSize = false;
 
         if (manager.RenderedClient)
             LabelAt(this, "Sisal uses home slots.\r\nWheel and automatic dialogs pause\r\nwhile Table Manager is enabled.", 513, 122);
@@ -107,7 +104,6 @@ internal sealed class TableManagerPanel : Panel
         _slots.SelectedIndexChanged += (_, _) => { if (!_loading) DisplaySlot(); };
         foreach (var control in new[] { _left, _top, _width, _height })
             control.ValueChanged += (_, _) => UpdateSlot();
-        _stack.CheckedChanged += (_, _) => UpdateSlot();
         Run(Reload);
     }
 
@@ -192,7 +188,6 @@ internal sealed class TableManagerPanel : Panel
         _top.Value = slot.Top;
         _width.Value = slot.Width;
         _height.Value = Math.Max(-1, slot.Height);
-        _stack.Checked = slot.Multislot;
         _loading = false;
     }
 
@@ -205,7 +200,6 @@ internal sealed class TableManagerPanel : Panel
         slot.Top = (int)_top.Value;
         slot.Width = (int)_width.Value;
         slot.Height = (int)_height.Value;
-        slot.Multislot = _stack.Checked;
         _slots.Items[i] = SlotLabel(slot, i);
         if (IsCurrentLayout())
         {
@@ -343,7 +337,7 @@ internal sealed class TableManagerPanel : Panel
     }
 
     private static string SlotLabel(TableManagerConfig.Slot slot, int i) =>
-        $"{i + 1}.  {slot.Left}, {slot.Top}   ·   {slot.Width} × {slot.EffectiveHeight}{(slot.Multislot ? "   Stack" : "")}";
+        $"{i + 1}.  {slot.Left}, {slot.Top}   ·   {slot.Width} × {slot.EffectiveHeight}";
 
     private static ComboBox Choice(string name, params string[] options)
     {

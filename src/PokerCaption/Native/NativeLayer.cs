@@ -231,6 +231,12 @@ namespace PokerCaption.Native
             return p == null ? -1 : *(int*)(p + 0x19D8);
         }
 
+        internal unsafe (int HeroSeat, bool CanSetAmount) ReadBetScriptState(int slot)
+        {
+            var p = (byte*)SlotAddress(_base, slot);
+            return p == null ? default : (*(int*)(p + 0x265C), *(int*)(p + 0x2660) != 0);
+        }
+
         [Flags]
         internal enum OptionButtonTrace { None = 0, Walked = 1, BackNode = 2, BackLabel = 4, WaitingNode = 8, WaitingLabel = 16, LimitReached = 32 }
 

@@ -142,10 +142,10 @@ namespace PokerCaption
             service.ConfigDir = Path.Combine(AppDir, "TableManagerConfigs");
             service.Load(Ini);
             controller.Build(connectToClient: false);
+            var pages = DesktopWindow.GetWorkspace(controller.Form);
             if (args.Length >= 3 && int.TryParse(args[2], out int page) &&
-                controller.Form.Controls.Find("workspace", true).Single() is TabControl tabs &&
-                page >= 0 && page < tabs.TabPages.Count)
-                tabs.SelectedIndex = page;
+                page >= 0 && page < pages.Controls.Count)
+                pages.SelectPage(pages.Controls[page]);
             Application.Run(controller.Form);
             return 0;
         }
@@ -332,7 +332,7 @@ namespace PokerCaption
 
             // --- binding map (Fase B) ---
             var map = UiBinding.Settings;
-            Check("desktop settings bind to unique controls", map.Count == 7 && map.Select(item => item.Control).Distinct().Count() == map.Count);
+            Check("desktop settings bind to unique controls", map.Count == 5 && map.Select(item => item.Control).Distinct().Count() == map.Count);
 
             // --- tag HUD (Fase 7) ---
             var tc = new TagContext
@@ -381,6 +381,19 @@ namespace PokerCaption
                     !table.HeroSampleUnavailable && SessionStats.Current.SessionHands == 1);
                 for (int i = 0; i < 3; i++) tableService.ObserveHeroSample(table, 0);
                 Check("General HUD clears the hand after three visible negative samples", !table.HeroInHand);
+
+                var stats = SessionStats.Current;
+                stats.RunActiveSeconds = 30;
+                stats.Tick(inHand: false);
+                Check("Hands per hour stays unchanged when the clock advances without a hand", stats.HandsPerHour == 0);
+                tableService.ObserveHeroSample(table, dealt);
+                tableService.ObserveHeroSample(table, dealt);
+                Check("Hands per hour updates on the next hand even before 72 seconds", stats.SessionHands == 2 && stats.HandsPerHour == 240);
+                stats.RunActiveSeconds = 120;
+                stats.Tick(inHand: false);
+                Check("Hands per hour keeps the last recorded rate between hands", stats.HandsPerHour == 240);
+                stats.ResetSessionHands();
+                Check("Resetting session hands clears the cached rate and preserves the cumulative hands", stats.HandsPerHour == 0 && stats.AllHands == 2);
             }
             finally { SessionStats.Current = savedSession; }
             // pot odds (definizioni originali): call=2, pot=12, stack=50
@@ -489,6 +502,15 @@ namespace PokerCaption
             var timed = timedTable.ActionHistory;
             var timingIni = new IniFile("");
             timingIni.Set("HUD", "actionsAddTimings", "1");
+            var combined = new SeatActionHistory();
+            combined.Observe(1, 0, 2, missing, events: [], snapshotTick: 900);
+            combined.Observe(1, 3, 4, missing, events: [], snapshotTick: 1000);
+            var visibleActions = new Dictionary<int, string> { [3] = "Call", [4] = "Raise" };
+            combined.Observe(1, 3, 8, visibleActions, events: [new(3, 3, 3, 1180, 1)]);
+            Check("HUD fills missing actions from visible labels without duplicating captured events",
+                combined.Format(3, timingIni) == "C 0.2s" && combined.Format(4, timingIni) == "R");
+            combined.Observe(1, 3, 8, visibleActions, events: [new(4, 3, 5, 1260, 2)]);
+            Check("HUD adds the captured timing to an existing visible action", combined.Format(4, timingIni) == "R 0.1s");
             timed.Observe(1, 0, 5, missing, events: new SharedMemory.SeatActionEvent[]
             {
                 new(3, 0, 8, 1200, 1), new(3, 0, 3, 2440, 2), new(5, 0, 5, 2750, 3)
@@ -644,8 +666,20 @@ namespace PokerCaption
 
             using (var ui = DesktopWindow.Create())
             {
-                Check("Desktop shell exposes four workspaces",
-                    ui.Text == "PokerCaption" && ui.Controls.Find("workspace", true).Single() is TabControl { TabCount: 4 });
+                var pages = DesktopWindow.GetWorkspace(ui);
+                Check("Desktop shell exposes four workspaces", ui.Text == "PokerCaption" && pages.Controls.Count == 4);
+                pages.SelectPage(pages.Controls["Table manager"]);
+                ui.Opacity = 0;
+                ui.ShowInTaskbar = false;
+                ui.Show();
+                Application.DoEvents();
+                bool restoredLayout = pages.SelectedPage.Name == "Table manager" &&
+                    pages.Controls.Cast<Control>().Where(c => c.Visible).SequenceEqual([pages.SelectedPage]) &&
+                    ui.Controls.Find("workspaceHeading", true).Single().Text == "Table layout";
+                pages.SelectPage(pages.Controls["HUD"]);
+                Check("Desktop startup and navigation agree with visible workspace",
+                    restoredLayout && pages.Controls.Cast<Control>().Where(c => c.Visible).SequenceEqual([pages.SelectedPage]) &&
+                    ui.Controls.Find("workspaceHeading", true).Single().Text == "HUD");
                 Check("General HUD editor hides the retired controls",
                     new[] { "generalHudAlign", "generalHudResetPosition", "generalHudVisible", "generalHudBackInvisible",
                         "generalHudBorderWidth" }.All(name => ui.Controls.Find(name, true).Length == 0));
@@ -674,6 +708,30 @@ namespace PokerCaption
                 Check("Action symbols dialog keeps symbol editing and only the timing toggle", grid.Rows.Count > 0 &&
                     grid.Columns.Cast<DataGridViewColumn>().Select(column => column.HeaderText).SequenceEqual(["Action", "Symbol"]) &&
                     controls.OfType<CheckBox>().Select(box => box.Text).SequenceEqual(["Add timings"]));
+            }
+            using (var autoClose = DesktopWindow.Create())
+            {
+                ((CheckBox)autoClose.Controls.Find("CheckBox344", true).Single()).Checked = true;
+                bool clientOpen = false;
+                int polls = 0;
+                using var timer = MainUiController.WireCaptionAutoClose(autoClose, () => { polls++; return clientOpen; });
+                void WaitForPoll(int count)
+                {
+                    var wait = System.Diagnostics.Stopwatch.StartNew();
+                    while (polls < count && wait.ElapsedMilliseconds < 1_200)
+                    {
+                        Application.DoEvents();
+                        Thread.Sleep(10);
+                    }
+                }
+                WaitForPoll(2);
+                bool waitedForFirst = polls >= 2 && !autoClose.IsDisposed;
+                clientOpen = true;
+                WaitForPoll(3);
+                clientOpen = false;
+                WaitForPoll(4);
+                Check("Auto-close waits to see a client and closes on the first poll without one",
+                    waitedForFirst && polls == 4 && autoClose.IsDisposed);
             }
 
             File.WriteAllText(Path.Combine(AppDir, "selftest2.txt"), sb.ToString());

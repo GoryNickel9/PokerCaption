@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using PokerCaption.Config;
 using PokerCaption.Engine;
+using PokerCaption.Native;
 
 namespace PokerCaption
 {
@@ -30,7 +31,7 @@ namespace PokerCaption
 
         private static readonly string[] UnavailableOptions =
         {
-            "CheckBox90", "CheckBox94", "CheckBox279", "Edit236", "UpDown165", "CheckBox549",
+            "CheckBox90", "CheckBox94", "CheckBox279", "Edit236", "UpDown165",
         };
 
         private sealed record DialogRule(CheckBox Box, string Caption, string LegacyKey);
@@ -44,7 +45,6 @@ namespace PokerCaption
             ("CheckBox401", "CloseTableHasConcluded", false),
             ("CheckBox504", "CloseTournamentIsOver", false),
             ("CheckBox283", "CloseTrnyLobby", false),
-            ("CheckBox390", "WaitingListOk", false),
             ("CheckBox316", "CurSessInfo", false),
             ("CheckBox208", "KeepPlaying", false),
             ("CheckBox50", "InactivityTO", false),
@@ -60,7 +60,7 @@ namespace PokerCaption
         // =========================================================== OPTIONS
         private void WireOptions(Form f)
         {
-            var page = (Control)TabPageByName(f, "Options") ?? f;
+            var page = WorkspacePageByName(f, "Options") ?? f;
 
             foreach (var name in UnavailableOptions)
                 if (Ctl(page, name) is Control unavailable)
@@ -105,19 +105,17 @@ namespace PokerCaption
                    name.Equals("SisalOpenGL.exe", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static System.Windows.Forms.Timer WireCaptionAutoClose(Form form, Func<bool> hasClient)
+        internal static System.Windows.Forms.Timer WireCaptionAutoClose(Form form, Func<bool> hasClient)
         {
-            var options = TabPageByName(form, "Options");
+            var options = WorkspacePageByName(form, "Options");
             if (options == null || Ctl(options, "CheckBox344") is not CheckBox enabled) return null;
 
-            var timer = new System.Windows.Forms.Timer { Interval = 1000 };
+            var timer = new System.Windows.Forms.Timer { Interval = 250 };
             bool clientSeen = false;
-            int consecutiveMisses = 0;
 
             void ApplySelection()
             {
                 timer.Stop();
-                consecutiveMisses = 0;
                 clientSeen = enabled.Checked && hasClient();
                 if (enabled.Checked) timer.Start();
             }
@@ -128,10 +126,9 @@ namespace PokerCaption
                 if (hasClient())
                 {
                     clientSeen = true;
-                    consecutiveMisses = 0;
                     return;
                 }
-                if (!clientSeen || ++consecutiveMisses < 2) return;
+                if (!clientSeen) return;
                 timer.Stop();
                 Log("CaptionAutoClose: ultimo client chiuso");
                 form.Close();
@@ -139,6 +136,48 @@ namespace PokerCaption
             form.Disposed += (_, _) => timer.Dispose();
             ApplySelection();
             return timer;
+        }
+
+        private static bool HasOpenCaptionClient()
+        {
+            bool found = false;
+            NativeMethods.EnumWindows((window, _) =>
+            {
+                if (!NativeMethods.IsWindowVisible(window)) return true;
+                string caption = PokerWindows.GetWindowText(window);
+                if (string.IsNullOrWhiteSpace(caption)) return true;
+                string kind = PokerWindows.GetClassName(window);
+                bool lobby = kind == ClientProfile.FrameClass ||
+                    caption.StartsWith("Sisal Lobby", StringComparison.OrdinalIgnoreCase) ||
+                    ClientProfile.MainTitles.Any(title => caption.Equals(title, StringComparison.OrdinalIgnoreCase) ||
+                        caption.StartsWith(title + " - ", StringComparison.OrdinalIgnoreCase));
+                bool table = kind == ClientProfile.TableClass ||
+                    (kind?.EndsWith("TableFrameClass", StringComparison.OrdinalIgnoreCase) ?? false);
+                if (!table && Array.IndexOf(ClientProfile.RenderTableClasses, kind) >= 0)
+                {
+                    var parsed = new TableInfo { Title = caption };
+                    TitleParser.Apply(parsed);
+                    table = parsed.TableName.Length > 0 && (parsed.GameType.Length > 0 || parsed.IsTourney);
+                }
+                if (!lobby && !table) return true;
+                NativeMethods.GetWindowThreadProcessId(window, out uint pid);
+                var process = NativeMethods.OpenProcess(NativeMethods.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+                if (process == IntPtr.Zero)
+                    found = lobby || kind == ClientProfile.TableClass;
+                else
+                {
+                    try
+                    {
+                        var path = new System.Text.StringBuilder(1024);
+                        uint size = (uint)path.Capacity;
+                        if (NativeMethods.QueryFullProcessImageNameW(process, 0, path, ref size))
+                            found = ClientProfile.IsClientProcess(Path.GetFileName(path.ToString())) && IsCaptionClient(path.ToString());
+                    }
+                    finally { NativeMethods.CloseHandle(process); }
+                }
+                return !found;
+            }, IntPtr.Zero);
+            return found;
         }
 
         /// <summary>Controlli Options gestiti dal controller ← valori attuali dell'INI.</summary>
@@ -158,7 +197,7 @@ namespace PokerCaption
         // ============================================================ DIALOGS
         private void WireDialogs(Form f)
         {
-            var page = (Control)TabPageByName(f, "Options") ?? f;
+            var page = WorkspacePageByName(f, "Options") ?? f;
             var captionPattern = new Regex("^Close\\s+'(.+?)'", RegexOptions.Singleline);
             foreach (var box in DesktopWindow.Descendants(page).OfType<CheckBox>())
             {
@@ -166,14 +205,7 @@ namespace PokerCaption
                 var match = captionPattern.Match(box.Text.Trim());
                 if (!match.Success) continue;
 
-                var legacy = box.Name switch
-                {
-                    "cbCloseMyNews" => "CloseMyNews",
-                    "cbCloseLogoutInfo" => "CloseLogoutInfo",
-                    "cbStarsAccountInfo" => "StarsAccountInfo",
-                    "CheckBox41" => "TrnyRegShowLobbyClose",
-                    _ => null,
-                };
+                string legacy = box.Name == "cbCloseLogoutInfo" ? "CloseLogoutInfo" : null;
                 var rule = new DialogRule(box, match.Groups[1].Value.Trim(), legacy);
                 _dialogRules.Add(rule);
                 box.CheckedChanged += (_, _) =>
@@ -206,7 +238,11 @@ namespace PokerCaption
                 entry.Key.Equals("FPafter", StringComparison.OrdinalIgnoreCase) ||
                 entry.Key.Equals("TableCapReached", StringComparison.OrdinalIgnoreCase) ||
                 entry.Key.Equals("CloseSeatIsReserved", StringComparison.OrdinalIgnoreCase) ||
-                entry.Key.Equals("CloseSeatIsOccupied", StringComparison.OrdinalIgnoreCase));
+                entry.Key.Equals("CloseSeatIsOccupied", StringComparison.OrdinalIgnoreCase) ||
+                entry.Key.Equals("CloseMyNews", StringComparison.OrdinalIgnoreCase) ||
+                entry.Key.Equals("StarsAccountInfo", StringComparison.OrdinalIgnoreCase) ||
+                entry.Key.Equals("TrnyRegShowLobbyClose", StringComparison.OrdinalIgnoreCase) ||
+                entry.Key.Equals("WaitingListOk", StringComparison.OrdinalIgnoreCase));
             var syncing = _tabsSync;
             _tabsSync = true;
             try
@@ -260,9 +296,8 @@ namespace PokerCaption
         }
 
         // ============================================================ helpers
-        private static TabPage TabPageByName(Form f, string title) =>
-            DesktopWindow.Descendants(f).OfType<TabPage>()
-                .FirstOrDefault(p => string.Equals(p.Text.Trim(), title, StringComparison.OrdinalIgnoreCase));
+        private static Control WorkspacePageByName(Form f, string name) =>
+            DesktopWindow.GetWorkspace(f).Controls[name];
 
         /// <summary>Controllo per nome (case-insensitive) in un sottoalbero.</summary>
         private static Control Ctl(Control root, string name) =>

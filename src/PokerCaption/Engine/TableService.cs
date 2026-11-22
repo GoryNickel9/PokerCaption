@@ -27,6 +27,7 @@ namespace PokerCaption.Engine
         private long _nextHudScan;
         private long _nextLayoutRefresh;
         private readonly object _captureGate = new();
+        private readonly ManualResetEventSlim _pixelWake = new(false);
 
         public BetScriptEngine Betscript { get; private set; }
         public TableManagerEngine Manager { get; private set; }
@@ -118,6 +119,7 @@ namespace PokerCaption.Engine
 
             // pixel-watch su thread dedicato (niente jank UI)
             _pixelRun = true;
+            _pixelWake.Reset();
             _pixelThread = new Thread(PixelLoop) { IsBackground = true, Name = "PixelLoop" };
             _pixelThread.Start();
 
@@ -147,6 +149,7 @@ namespace PokerCaption.Engine
             _hudTimer?.Dispose();
             _hudTimer = null;
             _pixelRun = false;
+            _pixelWake.Set();
             try { _pixelThread?.Join(1500); } catch { }
             _pixelThread = null;
             foreach (var table in _tables)
@@ -209,7 +212,8 @@ namespace PokerCaption.Engine
                     t.Ante = lt.Ante;
                     t.MaxSeats = lt.MaxSeats;
                     t.TableName = lt.TableName;
-                    if (!string.Equals(t.HeroNick, lt.HeroNick, StringComparison.OrdinalIgnoreCase)) t.HeroSeat = 0;
+                    if (!string.Equals(t.HeroNick, lt.HeroNick, StringComparison.OrdinalIgnoreCase))
+                        t.HeroSeat = t.ConfirmedHeroSeat = 0;
                     t.HeroNick = lt.HeroNick;
                     NativeMethods.GetWindowRect(t.Hwnd, out t.Rect);
                 }
@@ -283,8 +287,12 @@ namespace PokerCaption.Engine
             if (texts.Count == 0 && scanStatus != SharedMemory.CocosScanStatus.Walked) return;
 
             double bb = t.Bb > 0 ? t.Bb : 1.0;
+            t.BetBoxInBb = Manager.RenderedClient && TextsPotInBb;
             double ToUnits(double v) => TextsPotInBb ? v * bb : v;
             bool heroStackSeen = false;
+            var betScriptState = _shared.ReadBetScriptState(t.Slot);
+            if (betScriptState.HeroSeat is >= 1 and <= 10)
+                t.HeroSeat = t.ConfirmedHeroSeat = betScriptState.HeroSeat;
             NativeMethods.GetClientRect(t.Hwnd, out var client);
 
             foreach (var (rect, text, node, seat) in texts)
@@ -311,9 +319,10 @@ namespace PokerCaption.Engine
                         t.SeatStacks[seat] = stack;
                         t.SeatBounds[seat] = rect;
                         var hero = Pixels.HeroRect;
-                        if (!string.IsNullOrEmpty(t.HeroNick) && client.Right > 0 && client.Bottom > 0 &&
+                        if (seat == t.ConfirmedHeroSeat || (t.ConfirmedHeroSeat == 0 && !Manager.RenderedClient &&
+                            !string.IsNullOrEmpty(t.HeroNick) && client.Right > 0 && client.Bottom > 0 &&
                             hero.Contains((rect.Left + rect.Width / 2f) / client.Right,
-                                (rect.Top + rect.Height / 2f) / client.Bottom))
+                                (rect.Top + rect.Height / 2f) / client.Bottom)))
                         {
                             t.HeroSeat = seat;
                             t.Stack = stack;
@@ -336,7 +345,7 @@ namespace PokerCaption.Engine
             }
             if (scanStatus != SharedMemory.CocosScanStatus.Walked) return;
             if (Manager.RenderedClient)
-                ObserveHeroAction(t, t.AmountToCall.HasValue && !string.IsNullOrEmpty(t.HeroNick));
+                ObserveHeroAction(t, betScriptState.CanSetAmount && t.AmountToCall.HasValue && !string.IsNullOrEmpty(t.HeroNick));
             var actions = _shared.ReadSeatActionEvents(t.Slot, ref t.LastActionSequence, out bool droppedActions, out uint? snapshotTick);
             if (droppedActions) _log($"HUD: coda azioni incompleta su '{t.TableName}'");
             int street = t.ActionHistory.Observe(t.HandStamp, _shared.ReadBoardCards(t.Slot),
@@ -407,10 +416,9 @@ namespace PokerCaption.Engine
             {
                 t.HeroInHand = true;
                 Interlocked.Increment(ref t.HandStamp);
-                SessionStats.Current.SessionHands++;
-                SessionStats.Current.AllHands++;
+                long hand = SessionStats.Current.RecordHand();
                 Hud.OnHandChanged(t);
-                _log($"mano #{SessionStats.Current.SessionHands} su '{t.TableName}'");
+                _log($"mano #{hand} su '{t.TableName}'");
             }
             if (t.HeroInHand && t.HeroInFalseTicks >= 3)
                 t.HeroInHand = false;
@@ -438,7 +446,7 @@ namespace PokerCaption.Engine
                     }
                 }
                 catch { }
-                Thread.Sleep(700);
+                if (!_pixelRun || _pixelWake.Wait(700)) break;
             }
         }
 

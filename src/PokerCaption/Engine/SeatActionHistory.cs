@@ -10,7 +10,7 @@ namespace PokerCaption.Engine;
 
 internal sealed class SeatActionHistory
 {
-    private readonly Dictionary<int, List<(int street, string key, string symbol, uint? duration)>> _history = new();
+    private readonly Dictionary<int, List<(int street, string key, string symbol, uint? duration, bool fromSnapshot)>> _history = new();
     private readonly Dictionary<int, string> _lastVisible = new();
     private readonly Dictionary<int, Rectangle> _anchors = new();
     private readonly List<SeatActionEvent> _pendingPreflop = new();
@@ -35,18 +35,28 @@ internal sealed class SeatActionHistory
         _hasPreflopLimp = false;
     }
 
-    private void Append(int seat, int street, int code, uint? tick = null, int sequence = 0)
+    private void Append(int seat, int street, int code, uint? tick = null, int sequence = 0, bool trackTiming = true)
     {
-        if (street != _timingStreet || (sequence > 0 && _timingSequence > 0 && sequence != _timingSequence + 1))
-            _timingTick = null;
-        if (sequence > 0) _timingSequence = sequence;
-        _timingStreet = street;
+        if (trackTiming)
+        {
+            if (street != _timingStreet || (sequence > 0 && _timingSequence > 0 && sequence != _timingSequence + 1))
+                _timingTick = null;
+            if (sequence > 0) _timingSequence = sequence;
+            _timingStreet = street;
+        }
         if (seat < 1 || seat > 10 || code <= 0 || code >= ActionSymbols.Length) return;
         if (!_history.TryGetValue(seat, out var actions)) _history[seat] = actions = new();
         var (key, symbol) = ActionSymbols[code];
-        if (code == 1 && actions.Any(action => action.key == key)) return;
-        if (code is 2 or 4 && actions.Any(action => action.street == street && action.key == key)) return;
-        if (code == 6 && street == 0)
+        bool replacesSnapshot = trackTiming && actions.Count > 0 && actions[^1].fromSnapshot &&
+            actions[^1].street == street && (actions[^1].key == key || (code == 6 && actions[^1].key == "1stimp"));
+        if (replacesSnapshot)
+        {
+            key = actions[^1].key;
+            symbol = actions[^1].symbol;
+        }
+        else if (code == 1 && actions.Any(action => action.key == key)) return;
+        else if (code is 2 or 4 && actions.Any(action => action.street == street && action.key == key)) return;
+        else if (code == 6 && street == 0)
         {
             if (actions.Any(action => action.street == 0 && action.key is "1stimp" or "Limp")) return;
             if (!_hasPreflopLimp) (key, symbol) = ("1stimp", "L");
@@ -63,8 +73,10 @@ internal sealed class SeatActionHistory
                 if (elapsed <= int.MaxValue) duration = elapsed;
             }
         }
-        _timingTick = tick;
-        actions.Add((street, key, symbol, duration));
+        if (trackTiming) _timingTick = tick;
+        var item = (street, key, symbol, duration, !trackTiming);
+        if (replacesSnapshot) actions[^1] = item;
+        else actions.Add(item);
     }
 
     public int Observe(int hand, int cards, double pot, IReadOnlyDictionary<int, string> visible,
@@ -120,29 +132,30 @@ internal sealed class SeatActionHistory
         _emptyPot = false;
         _lastPot = pot;
         _street = street;
-        if (events == null)
+        foreach (var (seat, label) in visible)
         {
-            foreach (var (seat, label) in visible)
+            if (_lastVisible.TryGetValue(seat, out var prior) && prior == label) continue;
+            int code = label.Split(' ', 2)[0].ToLowerInvariant() switch
             {
-                if (_lastVisible.TryGetValue(seat, out var prior) && prior == label) continue;
-                int code = label.Split(' ', 2)[0].ToLowerInvariant() switch
-                {
-                    "fold" => 1, "check" => 2, "call" => 3, "bet" => 4, "raise" => 5,
-                    "limp" => 6, "all-in" or "all" => 7, "post" => 8, _ => 0
-                };
-                Append(seat, street, code);
-            }
-            _lastVisible.Clear();
-            foreach (var (seat, label) in visible) _lastVisible[seat] = label;
+                "fold" => 1, "check" => 2, "call" => 3, "bet" => 4, "raise" => 5,
+                "limp" => 6, "all-in" or "all" => 7, "post" => 8, _ => 0
+            };
+            if (code == 0 || events?.Any(action => action.Seat == seat &&
+                Street(action.Cards) == street && action.Code != 8) == true) continue;
+            if (_history.TryGetValue(seat, out var recorded) && recorded[^1].street == street &&
+                (recorded[^1].key == ActionSymbols[code].key || (code == 6 && recorded[^1].key == "1stimp"))) continue;
+            Append(seat, street, code, trackTiming: false);
         }
+        _lastVisible.Clear();
+        foreach (var (seat, label) in visible) _lastVisible[seat] = label;
         if (anchors != null)
             foreach (var (seat, bounds) in anchors)
-                if (_history.ContainsKey(seat)) _anchors[seat] = bounds;
+                _anchors[seat] = bounds;
         return 1 << street;
     }
 
     public IEnumerable<KeyValuePair<int, Rectangle>> MissingAnchors(IReadOnlyDictionary<int, Rectangle> current) =>
-        _anchors.Where(anchor => !current.ContainsKey(anchor.Key));
+        _anchors.Where(anchor => _history.ContainsKey(anchor.Key) && !current.ContainsKey(anchor.Key));
 
     private static string Seconds(uint milliseconds) =>
         (milliseconds / 1000d).ToString("0.#", CultureInfo.InvariantCulture);

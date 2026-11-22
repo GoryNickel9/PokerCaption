@@ -71,11 +71,16 @@ namespace PokerCaption.Engine
             }
             if (result.Amount == null || !t.HeroAct || t.BetScriptTurn != turn) return null;
 
-            string text = result.Text;
+            string text = FormatForBetBox(result, t, coords);
             if (coords)
             {
-                if (!ClientProfile.Points.TryGetValue("BetBox", out var box) || !IsBetBoxPoint(box) ||
-                    !CoordsEngine.TypeInto(t.Hwnd, box.X, box.Y, text)) return null;
+                if (!ClientProfile.Points.TryGetValue("BetBox", out var box)) return null;
+                box = BetBoxPoint(box);
+                if (!IsBetBoxPoint(box) || !CoordsEngine.TypeInto(t.Hwnd, box.X, box.Y, text, foregroundOnly: true))
+                {
+                    if (Log) _log($"bet[{t.TableName}] bet box unavailable; amount '{text}' was not sent");
+                    return null;
+                }
             }
             else if (currentText != text && !Input.SetBetBox(t.Editor, text)) return null;
 
@@ -84,6 +89,15 @@ namespace PokerCaption.Engine
             if (Log) _log($"bet[{t.TableName}] street={t.Street} rule={result.RuleIndex + 1} -> '{text}'");
             return text;
         }
+
+        internal static string FormatForBetBox(Preview result, TableInfo table, bool coords) =>
+            coords && table.BetBoxInBb
+                ? FormulaEval.Format(result.Amount.Value / table.Bb, result.Decimals)
+                : result.Text;
+
+        // The previous stock point overlaps the slider at the standard slot size.
+        internal static (float X, float Y) BetBoxPoint((float X, float Y) point) =>
+            point == (0.730f, 0.865f) ? (0.697f, 0.872f) : point;
 
         internal static Scenario ScenarioForTable(TableInfo t, double? betBox)
         {

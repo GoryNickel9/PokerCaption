@@ -15,9 +15,7 @@ namespace PokerCaption.Engine
 
         internal static readonly IReadOnlyList<Entry> Settings =
         [
-            new("cbCloseMyNews", "PokerCaption", "CloseMyNews"),
             new("cbCloseLogoutInfo", "PokerCaption", "CloseLogoutInfo"),
-            new("cbStarsAccountInfo", "PokerCaption", "StarsAccountInfo"),
             new("hudActive", "HUD", "HudActive"),
             new("lockGeneral", "HUD", "LockGeneral"),
             new("lockHud", "HUD", "LockHUD"),

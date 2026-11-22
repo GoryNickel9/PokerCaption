@@ -8,9 +8,10 @@ public sealed class TableManagerEngine
 {
     private readonly Action<string> _log;
     private readonly Func<IntPtr, Rectangle, bool> _place;
-    private readonly Dictionary<int, Rectangle> _geometryPreview = new();
+    private readonly Dictionary<int, (Rectangle Bounds, bool ExplicitHeight)> _geometryPreview = new();
     private readonly Dictionary<TableInfo, Placement> _placements = new();
     private const int MoveRetryMs = 1000;
+    private const int SettleMs = 150;
     private volatile bool _enabled;
 
     private sealed class Placement
@@ -19,6 +20,7 @@ public sealed class TableManagerEngine
         public int Active = -1;
         public bool OpenedActive;
         public Rectangle? Bounds;
+        public bool CheckSize;
         public long NextMove;
         public bool Detached;
         public Rectangle? DragOrigin;
@@ -42,14 +44,15 @@ public sealed class TableManagerEngine
     }
 
     internal void PreviewGeometry(int slot, TableManagerConfig.Slot geometry) =>
-        _geometryPreview[slot] = new Rectangle(geometry.Left, geometry.Top, geometry.Width, geometry.EffectiveHeight);
+        _geometryPreview[slot] = (new Rectangle(geometry.Left, geometry.Top, geometry.Width, geometry.EffectiveHeight),
+            geometry.Height > 0);
 
     internal void ClearGeometryPreview() => _geometryPreview.Clear();
 
     internal void ClearGeometryPreview(int slot) => _geometryPreview.Remove(slot);
 
     internal bool IsMoving(TableInfo table) => Enabled && _placements.TryGetValue(table, out var state) &&
-        (state.DragOrigin.HasValue || (state.Bounds.HasValue && state.SettledBounds == null &&
+        (state.DragOrigin.HasValue || (state.Bounds.HasValue && (state.CheckSize || state.SettledBounds == null) &&
             Environment.TickCount64 < state.NextMove));
 
     public void Load(IniFile ini)
@@ -105,7 +108,7 @@ public sealed class TableManagerEngine
             if (table.Locked || state.Detached || state.DragOrigin.HasValue) continue;
             if (LayoutOnly) table.InActiveSlot = false;
             if (state.Home < 0)
-                state.Home = Claim(homeSlots, homes);
+                state.Home = Claim(homes);
             if (LayoutOnly) continue;
 
             bool wantsActive = table.HeroAct ||
@@ -122,7 +125,7 @@ public sealed class TableManagerEngine
         {
             var state = _placements[table];
             if (table.Locked || state.Detached || state.DragOrigin.HasValue || !table.InActiveSlot || state.Active >= 0) continue;
-            state.Active = Claim(activeSlots, active);
+            state.Active = Claim(active);
         }
 
         var occupancy = new Dictionary<Rectangle, int>();
@@ -145,8 +148,19 @@ public sealed class TableManagerEngine
                         {
                             state.Bounds = bounds;
                             state.SettledBounds = null;
+                            state.CheckSize = _place == null && RenderedClient && UsesExplicitHeight(state.Active >= 0, table.PlacedSlot);
                         }
-                        state.NextMove = placed ? (_place == null ? now + 150 : now) : now + MoveRetryMs;
+                        state.NextMove = placed ? (_place == null ? now + SettleMs : now) : now + MoveRetryMs;
+                    }
+                    else if (now >= state.NextMove && state.CheckSize)
+                    {
+                        state.CheckSize = false;
+                        if (state.SettledBounds is Rectangle actual && FitWithinHeight(bounds, actual) is Rectangle fitted &&
+                            PlaceWindow(table.Hwnd, fitted))
+                        {
+                            state.SettledBounds = null;
+                            state.NextMove = now + SettleMs;
+                        }
                     }
                 }
             }
@@ -162,18 +176,30 @@ public sealed class TableManagerEngine
 
     private Rectangle SlotBounds(bool active, int index)
     {
-        if (!active && _geometryPreview.TryGetValue(index, out var preview)) return preview;
+        if (!active && _geometryPreview.TryGetValue(index, out var preview)) return preview.Bounds;
         var slot = (active ? Config.ActiveSlots : Config.InactiveSlots)[index];
         return new Rectangle(slot.Left, slot.Top, slot.Width, slot.EffectiveHeight);
     }
 
-    private static int Claim(IReadOnlyList<TableManagerConfig.Slot> slots, int[] occupied)
+    private bool UsesExplicitHeight(bool active, int index) =>
+        !active && _geometryPreview.TryGetValue(index, out var preview)
+            ? preview.ExplicitHeight
+            : (active ? Config.ActiveSlots : Config.InactiveSlots)[index].Height > 0;
+
+    internal static Rectangle? FitWithinHeight(Rectangle requested, Rectangle actual)
     {
-        for (int i = 0; i < slots.Count; i++)
-            if (occupied[i] == 0) { occupied[i]++; return i; }
-        for (int i = 0; i < slots.Count; i++)
-            if (slots[i].Multislot) { occupied[i]++; return i; }
-        return -1;
+        // When the client accepts the width but enforces a taller shape, shrink the width once.
+        if (actual.Location != requested.Location || actual.Width != requested.Width ||
+            actual.Height <= requested.Height || actual.Width <= 1) return null;
+        int width = Math.Max(1, (int)((long)actual.Width * requested.Height / actual.Height));
+        return new Rectangle(requested.Location, new Size(width, requested.Height));
+    }
+
+    private static int Claim(int[] occupied)
+    {
+        int slot = Array.IndexOf(occupied, 0);
+        if (slot >= 0) occupied[slot] = 1;
+        return slot;
     }
 
     private void TrackDrop(TableInfo table, Placement state)

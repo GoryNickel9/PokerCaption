@@ -67,15 +67,6 @@ namespace PokerCaption
                 Program.Service.Hud.Load(Program.Ini);      // al cambio ricrea i pannelli col giusto click-through
                 Log("HUD lock = " + UiBinding.IsActive(f, "lockHud"));
             });
-            var tabs = (TabControl)Ctl(f, "workspace");
-            string pageName = ini.Get("PokerCaption", "ActivePage", "HUD");
-            var selected = tabs.TabPages.Cast<TabPage>().FirstOrDefault(page => page.Text == pageName);
-            if (selected != null) tabs.SelectedTab = selected;
-            tabs.SelectedIndexChanged += (_, _) =>
-            {
-                if (tabs.SelectedTab is { } page) ini.Set("PokerCaption", "ActivePage", page.Text);
-            };
-
             // tab HUD: gruppo 'HUD panels' (Table/Player panels + General HUD):
             // liste dai pannelli INI + pulsanti Add new/Delete/Clone (MainUi.HudPanels.cs)
             WireHudPanels(f);
@@ -84,6 +75,13 @@ namespace PokerCaption
             // che può chiudere il form a metà Build (il wiring su form chiuso è rumore)
             AttachBetscript(f);
             WireTabs(f);
+
+            var pages = DesktopWindow.GetWorkspace(f);
+            string pageName = ini.Get("PokerCaption", "ActivePage", "HUD");
+            var selected = pages.Controls.Cast<Control>().FirstOrDefault(page =>
+                string.Equals(page.Name, pageName, StringComparison.OrdinalIgnoreCase));
+            if (selected != null) pages.SelectPage(selected);
+            pages.PageChanged += (_, _) => ini.Set("PokerCaption", "ActivePage", pages.SelectedPage.Name);
 
             // Save options salva PokerCaption.ini e conserva il backup .ini_bak.
             if (Ctl(f, "saveOptions") is Button btnSaveOpts)
@@ -173,7 +171,7 @@ namespace PokerCaption
                 });
             }
 
-            WireCaptionAutoClose(f, () => ClientLocator.FindClients().Any(c => IsCaptionClient(c.ExePath)));
+            WireCaptionAutoClose(f, HasOpenCaptionClient);
         }
 
         // ---------- betscript list ----------

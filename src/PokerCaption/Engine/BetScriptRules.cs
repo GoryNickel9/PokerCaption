@@ -13,7 +13,10 @@ namespace PokerCaption.Engine
             double? Contributed = 0, double MinimumBet = 0,
             double? StreetStartPot = null, double? BetBox = null, double? AmountToCall = null);
 
-        public sealed record Preview(int RuleIndex, double? Amount, string Text, string Error);
+        public sealed record Preview(int RuleIndex, double? Amount, string Text, string Error)
+        {
+            internal int Decimals { get; init; } = 2;
+        }
 
         /// <summary>Evaluate an explicit scenario using the first matching rule, in list order.</summary>
         public Preview EvaluateScenario(Scenario s)
@@ -66,7 +69,7 @@ namespace PokerCaption.Engine
                     continue;
                 }
                 amount = Math.Clamp(amount, s.MinimumBet, max ?? s.Stack);
-                return new(i, amount, FormulaEval.Format(amount, result.Decimals), null);
+                return new(i, amount, FormulaEval.Format(amount, result.Decimals), null) { Decimals = result.Decimals };
             }
             return invalidRule ?? new(-1, null, null, null);
         }

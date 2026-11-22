@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.Text;
+using System.Threading;
 using PokerCaption.Config;
 
 namespace PokerCaption.Engine
@@ -27,36 +28,56 @@ namespace PokerCaption.Engine
         public bool InHandNow;                   // ultimo stato inHand visto dal servizio
         private double _cumSecondsAtLoad;        // cumulativo storico dal file
         private DateTime _lastUtc = DateTime.UtcNow;
+        private readonly object _sessionGate = new();
+        private double _handsPerHour;
 
         public static SessionStats Current = new SessionStats();
 
         // display per-sessione: 0:00 alla prima mano
         public TimeSpan SessionTime => Started ? TimeSpan.FromSeconds(RunActiveSeconds) : TimeSpan.Zero;
-        public double HandsPerHour
+        public double HandsPerHour => Volatile.Read(ref _handsPerHour);
+        public double Net => TotalCashout - TotalBuyin;
+
+        internal long RecordHand()
         {
-            get
+            lock (_sessionGate)
             {
-                var h = RunActiveSeconds / 3600.0;
-                return h > 0.02 ? SessionHands / h : 0;
+                SessionHands++;
+                AllHands++;
+                Volatile.Write(ref _handsPerHour, RunActiveSeconds > 0 ? 3600.0 * SessionHands / RunActiveSeconds : 0);
+                return SessionHands;
             }
         }
-        public double Net => TotalCashout - TotalBuyin;
 
         /// <summary>Chiamato a ogni ciclo di scansione e dal timer HUD: inHand = hero in mano su almeno un tavolo.
         /// Il tempo PARTE alla prima mano conteggiata (carte effettivamente ricevute), non al primo pixel "in mano".</summary>
         public void Tick(bool inHand)
         {
-            var now = DateTime.UtcNow;
-            if (!Started && SessionHands > 0) Started = true;
-            if (Started && inHand)
-                RunActiveSeconds += (now - _lastUtc).TotalSeconds;
-            _lastUtc = now;
+            lock (_sessionGate)
+            {
+                var now = DateTime.UtcNow;
+                if (!Started && SessionHands > 0) Started = true;
+                if (Started && inHand)
+                    RunActiveSeconds += (now - _lastUtc).TotalSeconds;
+                _lastUtc = now;
+            }
         }
 
         // reset dal menu del General HUD
-        public void ResetSessionTime() => RunActiveSeconds = 0;
-        public void ResetSessionHands() => SessionHands = 0;
-        public void ResetSessionTags() { SessionHands = 0; RunActiveSeconds = 0; AllTrnys = 0; }
+        public void ResetSessionTime() => ResetSession(time: true, hands: false);
+        public void ResetSessionHands() => ResetSession(time: false, hands: true);
+        public void ResetSessionTags() => ResetSession(time: true, hands: true);
+
+        private void ResetSession(bool time, bool hands)
+        {
+            lock (_sessionGate)
+            {
+                if (time) RunActiveSeconds = 0;
+                if (hands) SessionHands = 0;
+                if (time && hands) AllTrnys = 0;
+                Volatile.Write(ref _handsPerHour, 0);
+            }
+        }
 
         public void Load(string path)
         {

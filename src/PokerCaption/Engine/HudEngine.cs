@@ -236,7 +236,7 @@ namespace PokerCaption.Engine
                 _perPlayer[t.Hwnd] = windows = new();
             var used = new HashSet<(int seat, int panel)>();
             var origin = new NativeMethods.POINT();
-            if (onTop && NativeMethods.ClientToScreen(t.Hwnd, ref origin))
+            if (onTop && NativeMethods.ClientToScreen(t.Hwnd, ref origin) && NativeMethods.GetClientRect(t.Hwnd, out var client))
             {
                 foreach (var (seat, anchor) in t.SeatBounds.Concat(t.ActionHistory.MissingAnchors(t.SeatBounds)))
                 {
@@ -264,7 +264,10 @@ namespace PokerCaption.Engine
                         {
                             (text, def.FontColor, Color.Empty, def.FontSize, true)
                         }, Padding.Empty);
-                        var defaultPosition = new Point(origin.X + anchor.Left + anchor.Width / 2 - PlayerPanelStartInset, y);
+                        int left = Math.Clamp(anchor.Left + anchor.Width / 2 - PlayerPanelStartInset,
+                            0, Math.Max(0, client.Right - PlayerPanelStartInset * 3));
+                        int top = Math.Clamp(y - origin.Y, 0, Math.Max(0, client.Bottom - panel.Height));
+                        var defaultPosition = new Point(origin.X + left, origin.Y + top);
                         panel.Tag = defaultPosition;
                         if (!panel.Dragging)
                         {

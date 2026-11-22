@@ -14,8 +14,8 @@ public sealed partial class AutoDialogEngine
         var windowClasses = new Dictionary<IntPtr, string>();
         var engine = new AutoDialogEngine(null, table => activePopups.GetValueOrDefault(table, table),
             window => windowClasses.TryGetValue(window, out var name) ? name : TableScanner.GetClass(window));
-        ClosureTestChild.RegisterFixtureClass(PokerStarsRegistrationButtonClass);
-        ClosureTestChild.RegisterFixtureClass(FlutterRegistrationButtonClass);
+        ClosureTestChild.RegisterFixtureClass(PokerStarsDialogButtonClass);
+        ClosureTestChild.RegisterFixtureClass(FlutterDialogButtonClass);
         engine._clientPids.Add((uint)Environment.ProcessId);
         engine.SetOptionCaptions(captions);
         using var owner = new ClosureTestForm("Options test owner");
@@ -62,7 +62,7 @@ public sealed partial class AutoDialogEngine
             return false;
         }
 
-        foreach (string caption in captions.Where(c => c != ShowLobbyCaption))
+        foreach (string caption in captions)
         {
             var config = new IniFile(null);
             config.Set("AutoDialog", "Caption0", caption);
@@ -71,38 +71,22 @@ public sealed partial class AutoDialogEngine
             engine.Load(config);
             var (title, label, childClass) = caption switch
             {
-                RegistrationCaption => (RegistrationTitle, "OK", PokerStarsRegistrationButtonClass),
+
                 ReminderCaption => ("", "Reminder: Your current session has been active for 3 hours", "Static"),
-                FeedbackCaption => ("", "FeedbackforPokerStars", "Static"),
+
                 _ => (caption, (string)null, "Static"),
             };
             check("Options WinForms dialog " + caption,
-                Exercise(title, label, childClass, delayMs: delay,
-                    windowClass: caption == "Chest Announcement" ? EmbeddedBrowserClass : null) &&
+                Exercise(title, label, childClass, delayMs: delay) &&
                 Exercise(caption, null, modal: false, delayMs: delay, expectClose: false), "");
-            if (ExactDialogTitles.Contains(caption))
+            if (caption == LogoutCaption)
                 check("Options WinForms exact title " + caption, Exercise(title.ToLowerInvariant(), null, expectClose: false) &&
                     Exercise("Other dialog", title, expectClose: false), "");
-            if (caption is "Chest Announcement" or "My News")
-                check("Options WinForms embedded browser " + caption,
-                    Exercise(caption, null, modal: false, windowClass: EmbeddedBrowserClass) &&
-                    Exercise(caption, null, expectClose: caption == "My News"), "");
-            if (caption == RegistrationCaption)
-                check("Options WinForms registration keeps Cancel dialog", Exercise(title, "OK", childClass, expectClose: false, otherButton: "Cancel") &&
-                    Exercise(title, "OK", FlutterRegistrationButtonClass) &&
-                    Exercise(title, "OK", FlutterRegistrationButtonClass, expectClose: false, otherButton: "Cancel") &&
-                    Exercise(title, "Welcome to the tournament", expectClose: false), "");
             if (caption == ReminderCaption)
                 check("Options WinForms reminder prefixes", Exercise("", "Reminder:Yourcurrentsession has been active") &&
                     Exercise("Session", label, expectClose: false) &&
                     Exercise("", "Reminder: Your current ", otherLabel: "session has been active") &&
                     Exercise("", "Another message", otherLabel: label, expectClose: false), "");
-            if (caption == FeedbackCaption)
-                check("Options WinForms Feedback title gate", Exercise(caption, label, expectClose: false) &&
-                    Exercise("", label.ToLowerInvariant(), expectClose: false) &&
-                    Exercise("", "Feedbackfor", otherLabel: "PokerStars") &&
-                    Exercise("", "Unrelated text", otherLabel: label, expectClose: false), "");
-
         }
 
         foreach (var (key, caption) in new[]
@@ -170,41 +154,20 @@ public sealed partial class AutoDialogEngine
         }
         engine.SetClosureTables(Array.Empty<IntPtr>());
 
-        const string showLobby = ShowLobbyCaption;
-        const string registration = RegistrationTitle;
-        var registrationConfig = new IniFile(null);
-        registrationConfig.Set("AutoDialog", "Caption0", showLobby);
-        engine.Load(registrationConfig);
-        check("Options WinForms Show Lobby closes registration", captions.Contains(showLobby) &&
-            Exercise(registration, "Show Lobby", PokerStarsRegistrationButtonClass) &&
-            Exercise(registration, "Show Lobby", FlutterRegistrationButtonClass, visibleChild: false), "");
-        check("Options WinForms Show Lobby rejects unrelated windows",
-            Exercise(registration, "Show Lobby", "Static", expectClose: false) &&
-            Exercise(registration, "Show Lobby later", PokerStarsRegistrationButtonClass, expectClose: false) &&
-            Exercise(registration, "show lobby", PokerStarsRegistrationButtonClass, expectClose: false) &&
-            Exercise(registration, "Show Lobby", "Button", expectClose: false) &&
-            Exercise(registration, "Show Lobby", PokerStarsRegistrationButtonClass, modal: false, expectClose: false) &&
-            Exercise("Tournament Lobby", "Show Lobby", PokerStarsRegistrationButtonClass, expectClose: false) &&
-            Exercise(showLobby, null, expectClose: false) &&
-            Exercise(registration, "Show Lobby", PokerStarsRegistrationButtonClass, expectClose: false, recognized: false) &&
-            Exercise(registration, "Show Lobby", PokerStarsRegistrationButtonClass, expectClose: false,
-                otherButton: "Cancel", otherButtonClass: FlutterRegistrationButtonClass), "");
-
-        engine.Load(new IniFile(null));
-        check("Options WinForms Show Lobby off", Exercise(registration, "Show Lobby", PokerStarsRegistrationButtonClass, expectClose: false), "");
-
         var oldConfig = new IniFile(null);
         oldConfig.Set("AutoDialog", "Caption0", "TABLE CAP REACHED");
         oldConfig.Set("AutoDialog", "Caption1", "This seat is reserved for players on the waiting list");
         oldConfig.Set("AutoDialog", "Caption2", "This seat is occupied.");
         oldConfig.Set("AutoDialog", "Caption3", "My News");
+        oldConfig.Set("AutoDialog", "Caption4", LogoutCaption);
         engine.Load(oldConfig);
         check("Options WinForms legacy table cap rule is inert", Exercise("Table Cap Reached", null, expectClose: false), "");
         check("Options WinForms legacy seat reserved rule is inert",
             Exercise("This seat is reserved for players on the waiting list", null, expectClose: false), "");
         check("Options WinForms legacy seat occupied rule is inert",
             Exercise("This seat is occupied.", null, expectClose: false), "");
-        check("Options WinForms legacy filtering preserves other rules", Exercise("My News", null), "");
+        check("Options WinForms retired news rule is inert", Exercise("My News", null, expectClose: false), "");
+        check("Options WinForms legacy filtering preserves other rules", Exercise(LogoutCaption, null), "");
 
         foreach (var (key, title, buttonText) in ButtonOptions)
         {
@@ -212,23 +175,23 @@ public sealed partial class AutoDialogEngine
             config.Set("PokerCaption", key, 1);
             engine.Load(config);
             check("Options WinForms clicks the exact dialog button " + key,
-                Exercise(title, buttonText, PokerStarsRegistrationButtonClass, expectClose: false, expectClick: true,
+                Exercise(title, buttonText, PokerStarsDialogButtonClass, expectClose: false, expectClick: true,
                     otherButton: "Cancel") &&
-                Exercise(title, buttonText, FlutterRegistrationButtonClass, expectClose: false, expectClick: true), "");
+                Exercise(title, buttonText, FlutterDialogButtonClass, expectClose: false, expectClick: true), "");
             check("Options WinForms rejects unsafe dialog targets " + key,
-                Exercise(title.ToLowerInvariant(), buttonText, PokerStarsRegistrationButtonClass, expectClose: false) &&
-                Exercise(title, buttonText.ToLowerInvariant(), PokerStarsRegistrationButtonClass, expectClose: false) &&
+                Exercise(title.ToLowerInvariant(), buttonText, PokerStarsDialogButtonClass, expectClose: false) &&
+                Exercise(title, buttonText.ToLowerInvariant(), PokerStarsDialogButtonClass, expectClose: false) &&
                 Exercise(title, buttonText, "Button", expectClose: false) &&
-                Exercise(title, buttonText, PokerStarsRegistrationButtonClass, expectClose: false, visibleChild: false) &&
-                Exercise(title, buttonText, PokerStarsRegistrationButtonClass, expectClose: false, recognized: false) &&
-                Exercise(title, buttonText, PokerStarsRegistrationButtonClass, expectClose: false,
-                    otherButton: buttonText, otherButtonClass: FlutterRegistrationButtonClass) &&
-                Exercise(title, buttonText, PokerStarsRegistrationButtonClass, expectClose: false,
+                Exercise(title, buttonText, PokerStarsDialogButtonClass, expectClose: false, visibleChild: false) &&
+                Exercise(title, buttonText, PokerStarsDialogButtonClass, expectClose: false, recognized: false) &&
+                Exercise(title, buttonText, PokerStarsDialogButtonClass, expectClose: false,
+                    otherButton: buttonText, otherButtonClass: FlutterDialogButtonClass) &&
+                Exercise(title, buttonText, PokerStarsDialogButtonClass, expectClose: false,
                     beforeDeadline: child => child.SetText("Different button")), "");
             check("Options WinForms cancels dialog click when the flag is turned off " + key,
-                Exercise(title, buttonText, PokerStarsRegistrationButtonClass, expectClose: false,
+                Exercise(title, buttonText, PokerStarsDialogButtonClass, expectClose: false,
                     beforeDeadline: _ => engine.Load(new IniFile(null))) &&
-                Exercise(title, buttonText, FlutterRegistrationButtonClass, expectClose: false), "");
+                Exercise(title, buttonText, FlutterDialogButtonClass, expectClose: false), "");
         }
 
         var waitingListConfig = new IniFile(null);
@@ -237,7 +200,7 @@ public sealed partial class AutoDialogEngine
         using (var table = new ClosureTestForm("Waiting list table"))
         {
             table.Show();
-            using var button = new ClosureTestChild(table, PokerStarsRegistrationButtonClass, "Unjoin Waiting List");
+            using var button = new ClosureTestChild(table, PokerStarsDialogButtonClass, "Unjoin Waiting List");
             engine.SetClosureTables(new[] { table.Handle });
             engine.ScanWindow(table.Handle, 0, engine._runRevision, engine._configRevision);
             Flush();

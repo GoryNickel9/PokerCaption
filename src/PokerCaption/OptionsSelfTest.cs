@@ -10,7 +10,7 @@ namespace PokerCaption
         {
             var previousIni = Program.Ini;
             var controller = new MainUiController();
-            var page = TabPageByName(form, "Options");
+            var page = WorkspacePageByName(form, "Options");
             const string section = "PokerCaption";
             Program.Ini = new IniFile(null);
             try
@@ -47,7 +47,7 @@ namespace PokerCaption
                         Program.Ini.GetBool(section, key, !initial) == initial, "");
                 }
 
-                check("Options dialog rule count", controller._dialogRules.Count == 19,
+                check("Options dialog rule count", controller._dialogRules.Count == 9,
                     controller._dialogRules.Count.ToString());
                 foreach (var rule in controller._dialogRules)
                 {
@@ -78,37 +78,40 @@ namespace PokerCaption
                 Program.Ini.Set("AutoDialog", "Caption4", "Find Seat (Cash Games)");
                 Program.Ini.Set("AutoDialog", "Caption5", "Seat Me / All seats have been taken");
                 Program.Ini.Set("AutoDialog", "Caption6", "My News");
-                Program.Ini.Set("AutoDialog", "Delay6", 17);
+                Program.Ini.Set("AutoDialog", "Caption7", "PokerStars Logout Information");
+                Program.Ini.Set("AutoDialog", "Delay7", 17);
                 controller.SyncDialogsFromIni();
                 check("Options removed rules are purged and surviving delay is preserved",
                     removed.All(entry => Program.Ini.Get(section, entry.Item2) == null) &&
                     Program.Ini.GetInt("AutoDialog", "Count", -1) == 1 &&
-                    Program.Ini.Get("AutoDialog", "Caption0") == "My News" &&
+                    Program.Ini.Get("AutoDialog", "Caption0") == "PokerStars Logout Information" &&
                     Program.Ini.GetInt("AutoDialog", "Delay0", -1) == 17 &&
                     Program.Ini.Get("AutoDialog", "Caption1") == null, "");
-                if (Ctl(page, "cbCloseMyNews") is CheckBox myNews) myNews.Checked = false;
+                if (Ctl(page, "cbCloseLogoutInfo") is CheckBox logout) logout.Checked = false;
 
                 var columns = Ctl(page, "dialogColumns") as TableLayoutPanel;
                 check("Options dialog rules span two populated columns", columns is { ColumnCount: 2 } &&
                     columns.Controls.Count == 2 && columns.Controls.Cast<Control>().All(column => column.Controls.Count > 0) &&
-                    columns.Controls.Cast<Control>().Sum(column => column.Controls.OfType<CheckBox>().Count()) == 23, "");
+                    columns.Controls.Cast<Control>().Sum(column => column.Controls.OfType<CheckBox>().Count()) == 12, "");
 
                 check("Options Find a Player removed", Ctl(page, "CheckBox57") == null &&
                     Ctl(page, "Edit23") == null && Ctl(page, "UpDown45") == null, "");
-                Program.Ini.Set(section, "TrnyRegShowLobbyClose", 1);
+                string[] retiredControls = ["cbCloseMyNews", "cbStarsAccountInfo", "CheckBox532", "CheckBox472",
+                    "CheckBox477", "CheckBox508", "CheckBox390", "CheckBox549", "CheckBox452", "CheckBox89",
+                    "CheckBox41", "CheckBox63"];
+                string[] retiredKeys = ["WaitingListOk", "CloseMyNews", "StarsAccountInfo", "TrnyRegShowLobbyClose"];
+                foreach (string key in retiredKeys) Program.Ini.Set(section, key, 1);
                 controller.SyncDialogsFromIni();
-                var showLobby = Ctl(page, "CheckBox41") as CheckBox;
-                bool restored = showLobby is { Enabled: true, Checked: true };
-                if (restored) showLobby.Checked = false;
-                check("Options Show Lobby restores and clears legacy setting", restored &&
-                    !Program.Ini.GetBool(section, "TrnyRegShowLobbyClose", true), "");
+                check("Options retired dialog controls and legacy flags are removed",
+                    retiredControls.All(name => Ctl(page, name) == null) &&
+                    retiredKeys.All(key => Program.Ini.Get(section, key) == null), "");
                 Engine.AutoDialogEngine.CheckOptionsClosures(controller._dialogRules.Select(rule => rule.Caption), check);
                 CheckTrayAndSaveOptions(form, page, check);
             }
             finally { Program.Ini = previousIni; }
         }
 
-        private static void CheckTrayAndSaveOptions(Form form, TabPage page, Action<string, bool, string> check)
+        private static void CheckTrayAndSaveOptions(Form form, Control page, Action<string, bool, string> check)
         {
             using var window = new Form
             {

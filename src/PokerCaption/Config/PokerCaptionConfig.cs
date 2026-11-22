@@ -112,7 +112,7 @@ namespace PokerCaption.Config
 
     /// <summary>
     /// Caricatore dei config del Table manager (TableManagerConfigs\&lt;name&gt;):
-    /// sezioni [inact] / [act] con slot left/top/width/(height)/multislot
+    /// sezioni [inact] / [act] con slot left/top/width/(height)
     /// </summary>
     public sealed class TableManagerConfig
     {
@@ -121,7 +121,6 @@ namespace PokerCaption.Config
         public sealed class Slot
         {
             public int Left, Top, Width = 792, Height = -1;
-            public bool Multislot;
             internal readonly List<KeyValuePair<string, string>> Extra = new();
             public int EffectiveHeight => Height > 0 ? Height : Width == 640 ? 461 :
                 Math.Max(1, (int)Math.Round(Width * (546.0 / 792), MidpointRounding.AwayFromZero));
@@ -161,7 +160,7 @@ namespace PokerCaption.Config
             }
 
             var stack = new TableManagerConfig();
-            stack.InactiveSlots.Add(new Slot { Width = 640, Height = 461, Multislot = true });
+            stack.InactiveSlots.Add(new Slot { Width = 640, Height = 461 });
             for (int i = 1; i <= 5; i++) stack.ActiveSlots.Add(GridSlot(i, 3));
             stack.Save(dir, "stack", overwrite: false);
 
@@ -193,7 +192,7 @@ namespace PokerCaption.Config
             file.SaveAtomic(path, overwrite);
         }
 
-        private static readonly string[] SlotFields = { "left", "top", "width", "height", "multislot" };
+        private static readonly string[] SlotFields = { "left", "top", "width", "height" };
 
         private static bool SplitSlotKey(string key, out string field, out int index)
         {
@@ -213,7 +212,7 @@ namespace PokerCaption.Config
             {
                 var slot = slots[i];
                 var suffix = i.ToString(CultureInfo.InvariantCulture);
-                int[] values = { slot.Left, slot.Top, slot.Width, slot.Height, slot.Multislot ? 1 : 0 };
+                int[] values = { slot.Left, slot.Top, slot.Width, slot.Height };
                 for (int j = 0; j < SlotFields.Length; j++)
                     file.Set(name, SlotFields[j] + suffix, values[j]);
                 foreach (var entry in slot.Extra) file.Set(name, entry.Key + suffix, entry.Value);
@@ -231,12 +230,12 @@ namespace PokerCaption.Config
                     Left = f.GetInt(section, "left" + suffix),
                     Top = f.GetInt(section, "top" + suffix),
                     Width = Math.Max(1, f.GetInt(section, "width" + suffix, 792)),
-                    Multislot = f.GetBool(section, "multislot" + suffix),
                     Height = f.GetInt(section, "height" + suffix, -1)
                 };
                 foreach (var entry in f.Find(section).Entries)
                     if (SplitSlotKey(entry.Key, out var field, out var index) && index == i &&
                         !field.Equals("bind", StringComparison.OrdinalIgnoreCase) &&
+                        !field.Equals("multislot", StringComparison.OrdinalIgnoreCase) &&
                         !SlotFields.Contains(field, StringComparer.OrdinalIgnoreCase))
                         slot.Extra.Add(new(field, entry.Value));
                 list.Add(slot);

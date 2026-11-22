@@ -8,6 +8,10 @@ namespace PokerCaption
     {
         internal static void Run(Action<string, bool, string> check)
         {
+        check("BetScript absolute mouse coordinates preserve pixels across monitors",
+            new[] { -1920, -1501, -1, 0, 1088, 1919 }.All(x =>
+                (long)CoordsEngine.NormalizeMouseCoordinate(x, -1920, 3840) * 3840 / 65536 - 1920 == x), "");
+
             string path = TestPath();
             try
             {
@@ -85,13 +89,11 @@ namespace PokerCaption
                     panel.Controls.Find("Edit16", true).Single().Text == "pot*0.33" &&
                     panel.Controls.Find("Edit27", true).Single().Text == "0" &&
                     panel.Controls.Find("Edit28", true).Single().Text == "100", "");
-                Control container = panel;
-                while (container is not TabPage) container = container.Parent;
-                var page = (TabPage)container;
+                var pages = DesktopWindow.GetWorkspace(form);
                 form.Opacity = 0;
                 form.ShowInTaskbar = false;
                 form.Show();
-                ((TabControl)page.Parent).SelectedTab = page;
+                pages.SelectPage(pages.Controls["Betscript"]);
                 check("BetScript editor has no scenario preview",
                     form.Controls.Find("BetscriptPreview", true).Length == 0, "");
                 var rules = list.Parent;
@@ -181,6 +183,24 @@ namespace PokerCaption
             check("BetScript rejects calibrated action points as the bet box",
                 !BetScriptEngine.IsBetBoxPoint(ClientProfile.Points["Raise"]) &&
                 !BetScriptEngine.IsBetBoxPoint(ClientProfile.Points["Call"]), "");
+
+            var playMoney = new TableInfo
+            {
+                Title = "Cuyo VI - No Limit Hold'em 100/200 Play Money - Logged In as SamplePlayer",
+                Street = 1, Pot = 800, Stack = 8000, AmountToCall = 200, BetBoxInBb = true
+            };
+            TitleParser.Apply(playMoney);
+            check("Play Money cash title reads stakes without a currency symbol", playMoney is
+                { IsPlayMoney: true, IsTourney: false, Sb: 100, Bb: 200 }, "");
+            engine.Rules.Clear();
+            engine.Rules.Add(new BetScriptEngine.Rule { Streets = 1, Formula = "pot * 2" });
+            var playMoneyBet = engine.EvaluateScenario(BetScriptEngine.ScenarioForTable(playMoney, null));
+            check("BetScript converts 1600 chips into 8 BB for the rendered bet box only", playMoneyBet.Amount == 1600 &&
+                BetScriptEngine.FormatForBetBox(playMoneyBet, playMoney, coords: true) == "8" &&
+                BetScriptEngine.FormatForBetBox(playMoneyBet, playMoney, coords: false) == "1600", "");
+            check("BetScript corrects the stock field location and preserves custom calibration",
+                BetScriptEngine.BetBoxPoint((0.730f, 0.865f)) == (0.697f, 0.872f) &&
+                BetScriptEngine.BetBoxPoint((0.68f, 0.87f)) == (0.68f, 0.87f), "");
         }
 
         private static string TestPath() => Path.Combine(Path.GetTempPath(), "poker-caption-bets-" + Guid.NewGuid() + ".ini");
