@@ -147,10 +147,6 @@ internal sealed class SeatActionHistory
     private static string Seconds(uint milliseconds) =>
         (milliseconds / 1000d).ToString("0.#", CultureInfo.InvariantCulture);
 
-    public string LastTiming(int seat) =>
-        _history.TryGetValue(seat, out var actions) && actions[^1].duration is uint duration
-            ? Seconds(duration) : "";
-
     public string Format(int seat, IniFile ini)
     {
         if (!_history.TryGetValue(seat, out var actions)) return "";

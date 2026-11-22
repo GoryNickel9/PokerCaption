@@ -37,7 +37,7 @@ namespace PokerCaption
         {
             "plFormatStr" => new[]
             {
-                "[actions] - Player actions by street", "[timing] - Last action time in seconds"
+                "[actions] - Player actions by street"
             },
             "formatStr" => new[]
             {

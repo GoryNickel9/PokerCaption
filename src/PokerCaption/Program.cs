@@ -100,7 +100,7 @@ namespace PokerCaption
                 // SOLO le sezioni mancanti — le modifiche utente non vengono riscritte
                 LoadClientProfile();
                 Ini.SeedFrom(ClientProfileSource());
-                PokerCaptionConfig.MigrateTableHudFormats(Ini);
+                PokerCaptionConfig.MigrateHudFormats(Ini);
 
                 // session stats cumulative (global_stats, [GStats])
                 SessionStats.Current.Load(Path.Combine(AppDir, "global_stats"));
@@ -135,7 +135,7 @@ namespace PokerCaption
             ApplicationConfiguration.Initialize();
             Ini = new IniFile(null);
             Ini.SeedFrom(ClientProfileSource());
-            PokerCaptionConfig.MigrateTableHudFormats(Ini);
+            PokerCaptionConfig.MigrateHudFormats(Ini);
             using var service = new TableService(null, MainUiController.Log);
             Service = service;
             using var controller = new MainUiController();
@@ -349,11 +349,16 @@ namespace PokerCaption
             var legacyHud = new IniFile(null);
             const string retired = "[totalPot_bb][totalPot][toCall][seatStacks_bb][:][BB][SB][capt]";
             legacyHud.Set("HUD", "FormatStr0", retired + "[toCall_bb][%]");
-            legacyHud.Set("HUD", "plFormatStr0", "[actions]");
-            PokerCaptionConfig.MigrateTableHudFormats(legacyHud);
+            legacyHud.Set("HUD", "plFormatStr0", "[actions][TIMING]");
+            legacyHud.Set("GenHUD", "formatStr0", "[sessionTime][timing]");
+            legacyHud.Set("HUD", "actionsAddTimings", 1);
+            PokerCaptionConfig.MigrateHudFormats(legacyHud);
             Check("Retired HUD tags no longer resolve and saved table formats migrate", HudTags.Resolve(retired, tc) == retired &&
+                HudTags.Resolve("[timing]", tc) == "[timing]" && !HudTags.UsesActionHistory("[timing]") &&
                 legacyHud.Get("HUD", "FormatStr0") == "[pot_bb][pot][toCall_bb][%]" &&
-                legacyHud.Get("HUD", "plFormatStr0") == "[actions]");
+                legacyHud.Get("HUD", "plFormatStr0") == "[actions]" &&
+                legacyHud.Get("GenHUD", "formatStr0") == "[sessionTime]" &&
+                legacyHud.GetBool("HUD", "actionsAddTimings", false));
             Check("tag condizione heroAct", HudTags.Visible("[heroAct]", tc) && !HudTags.Visible("[heroAct]", new TagContext { Table = new TableInfo() }));
             Check("tag sconosciuto passthrough", HudTags.Resolve("[tagInesistente]", tc) == "[tagInesistente]");
             Check("tag [sessionTime]", HudTags.Resolve("[sessionTime]", new TagContext { Session = SessionStats.Current }).Contains(":"));
@@ -490,13 +495,18 @@ namespace PokerCaption
             });
             Check("Player HUD times forced posts and actions from the same batch",
                 timed.Format(3, timingIni) == "P 0sC 1.2s" && timed.Format(5, timingIni) == "R 0.3s" &&
-                timed.Format(3, null) == "PC" &&
-                HudTags.Resolve("[timing]", new TagContext { Table = timedTable, SeatNumber = 3 }) == "1.2");
+                timed.Format(3, null) == "PC");
             timedTable.HeroSeat = 3;
             timedTable.SeatStacks[3] = 42;
-            Check("Player HUD hides hero actions and timing while keeping stack data and opponent timing",
-                HudTags.Resolve("[stack] [actions][timing]", new TagContext { Table = timedTable, SeatNumber = 3 }) == "42 " &&
-                HudTags.Resolve("[timing]", new TagContext { Table = timedTable, SeatNumber = 5 }) == "0.3");
+            var previousIni = Ini;
+            try
+            {
+                Ini = timingIni;
+                Check("Player HUD shows action durations only for opponents with Add timings enabled",
+                    HudTags.Resolve("[stack] [actions]", new TagContext { Table = timedTable, SeatNumber = 3 }) == "42 " &&
+                    HudTags.Resolve("[actions]", new TagContext { Table = timedTable, SeatNumber = 5 }) == "R 0.3s");
+            }
+            finally { Ini = previousIni; }
             timed.Observe(1, 3, 15, missing, events: Array.Empty<SharedMemory.SeatActionEvent>(), snapshotTick: 5000);
             timed.Observe(1, 3, 20, missing, events: new SharedMemory.SeatActionEvent[]
             {
@@ -504,19 +514,19 @@ namespace PokerCaption
             });
             Check("Player HUD times street resets and recovers after a missing event",
                 timed.Format(3, timingIni) == "P 0sC 1.2s|X 0.5sF 0.4s" &&
-                timed.Format(5, timingIni) == "R 0.3s|B" && timed.LastTiming(5) == "");
+                timed.Format(5, timingIni) == "R 0.3s|B");
             timed.Observe(2, 0, 0, missing, events: new SharedMemory.SeatActionEvent[] { new(5, 0, 8, 7000, 8) });
             timed.Observe(2, 0, 5, missing, events: new SharedMemory.SeatActionEvent[] { new(3, 0, 3, 7550, 9) });
             Check("Player HUD preserves timing for buffered actions of a new hand",
                 timed.Format(5, timingIni) == "P 0s" && timed.Format(3, timingIni) == "C 0.6s");
             timed.Observe(2, 3, 10, missing, events: new SharedMemory.SeatActionEvent[] { new(3, 3, 4, 8100, 10) });
             Check("Player HUD omits duration if the new street was first seen with an action",
-                timed.Format(3, timingIni) == "C 0.6s|B" && timed.LastTiming(3) == "");
+                timed.Format(3, timingIni) == "C 0.6s|B");
             player.SeatNumber = 2;
             Check("Player HUD omits missing seat values", HudTags.Resolve("[stack_bb][actions]", player) == "");
             Check("Add tag player catalog is seat-specific",
                 MainUiController.AvailableHudTags("plFormatStr").Select(s => s.Split(' ')[0])
-                    .SequenceEqual(new[] { "[actions]", "[timing]" }));
+                    .SequenceEqual(new[] { "[actions]" }));
             Check("tag [p%] pot odds push", HudTags.Resolve("[p%]", tc) == "80.6", "= " + HudTags.Resolve("[p%]", tc));   // 50/62*100
             Check("HUD tag catalog removes General HUD RNG and keeps the supported table options",
                 !MainUiController.AvailableHudTags("formatStr").Any(tag => tag.StartsWith("[RNG]", StringComparison.Ordinal)) &&

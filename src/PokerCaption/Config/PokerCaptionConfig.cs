@@ -38,22 +38,27 @@ namespace PokerCaption.Config
                 entry.Key.Equals("CloseCantFound", StringComparison.OrdinalIgnoreCase) ||
                 entry.Key.Equals("CNFafter", StringComparison.OrdinalIgnoreCase));
 
-        internal static void MigrateTableHudFormats(IniFile ini)
+        internal static void MigrateHudFormats(IniFile ini)
         {
-            var hud = ini.Find("HUD");
-            if (hud == null) return;
-            for (int i = 0; i < hud.Entries.Count; i++)
+            foreach (string section in new[] { "HUD", "GenHUD" })
             {
-                var entry = hud.Entries[i];
-                if (!Regex.IsMatch(entry.Key, @"^FormatStr\d+$", RegexOptions.IgnoreCase)) continue;
-                string format = Regex.Replace(entry.Value, @"\[(totalPot_bb|totalPot|toCall|seatStacks_bb|:|BB|SB|capt)\]",
-                    match => match.Groups[1].Value.ToLowerInvariant() switch
-                    {
-                        "totalpot_bb" => "[pot_bb]",
-                        "totalpot" => "[pot]",
-                        _ => ""
-                    }, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-                hud.Entries[i] = new KeyValuePair<string, string>(entry.Key, format);
+                var hud = ini.Find(section);
+                if (hud == null) continue;
+                for (int i = 0; i < hud.Entries.Count; i++)
+                {
+                    var entry = hud.Entries[i];
+                    if (!Regex.IsMatch(entry.Key, @"^(?:pl)?FormatStr\d+$", RegexOptions.IgnoreCase)) continue;
+                    string format = entry.Value.Replace("[timing]", "", StringComparison.OrdinalIgnoreCase);
+                    if (section == "HUD" && !entry.Key.StartsWith("pl", StringComparison.OrdinalIgnoreCase))
+                        format = Regex.Replace(format, @"\[(totalPot_bb|totalPot|toCall|seatStacks_bb|:|BB|SB|capt)\]",
+                            match => match.Groups[1].Value.ToLowerInvariant() switch
+                            {
+                                "totalpot_bb" => "[pot_bb]",
+                                "totalpot" => "[pot]",
+                                _ => ""
+                            }, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                    hud.Entries[i] = new KeyValuePair<string, string>(entry.Key, format);
+                }
             }
         }
 
