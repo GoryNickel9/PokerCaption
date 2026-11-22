@@ -80,14 +80,10 @@ internal sealed class TableManagerPanel : Panel
         _down = ButtonAt(slotPanel, "Down", 94, 316, 87, () => Reorder(1));
         _remove = ButtonAt(slotPanel, "Remove", 187, 316, 71, RemoveSlot);
 
-        Put(slotPanel, _geometry, 269, 60, 190, 151);
+        Put(slotPanel, _geometry, 269, 60, 190, 123);
         Field(_geometry, "Left", _left, 13, 22, 75);
         Field(_geometry, "Top", _top, 99, 22, 75);
         Field(_geometry, "Width", _width, 13, 75, 75);
-        LabelAt(_geometry, "Height follows the table proportions", 13, 121);
-
-        if (manager.RenderedClient)
-            LabelAt(this, "Sisal uses home slots.\r\nWheel and automatic dialogs pause\r\nwhile Table Manager is enabled.", 513, 122);
 
         _apply = ButtonAt(this, "Save and activate", 20, 495, 132, Apply);
         _apply.BackColor = DesktopWindow.Accent;

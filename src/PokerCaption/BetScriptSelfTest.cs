@@ -32,23 +32,20 @@ namespace PokerCaption
                 var scenario = new BetScriptEngine.Scenario(1, 1, 0.5, 25, 150, 5, 1, 1, 10, 4);
                 var result = engine.EvaluateScenario(scenario);
                 check("BetScript uses street priority and ignores removed INI settings",
-                    result.RuleIndex == 0 && result.Amount == 2 &&
+                    result.RuleIndex == 0 && result.Amount == 1.5 &&
                     engine.EvaluateScenario(scenario with { Street = 4 }).RuleIndex == -1, result.Text ?? "");
-                engine.Rules[0].PushPercent = 15;
-                check("BetScript rounded value triggers full shove using hero stack",
-                    engine.EvaluateScenario(scenario with { Contributed = 1 }).Amount == 11, "");
-                check("BetScript skips a shove if hero contribution is missing",
-                    engine.EvaluateScenario(scenario with { Contributed = null }).RuleIndex == 2, "");
-                engine.Rules[0].PushPercent = 20;
-                check("BetScript strict push threshold and minimum bet",
+                check("BetScript still applies legal bet limits without optional sizing adjustments",
                     engine.EvaluateScenario(scenario with { MinimumBet = 3 }).Amount == 3, "");
+                engine.Rules[0].Formula = "20bb";
+                check("BetScript limits a formula to the total available stack",
+                    engine.EvaluateScenario(scenario with { Contributed = 1 }).Amount == 11, "");
+                check("BetScript skips a formula above the remaining stack when the contribution is unknown",
+                    engine.EvaluateScenario(scenario with { Contributed = null }).RuleIndex == 2, "");
                 engine.Rules[0].Formula = "unknown + 1";
                 check("BetScript invalid formula falls through", engine.EvaluateScenario(scenario).RuleIndex == 2, "");
                 engine.Rules[0].Formula = "1 2";
                 check("BetScript keeps distinct formula tokens separated", engine.EvaluateScenario(scenario).RuleIndex == 2, "");
                 engine.Rules[0].Formula = "pot + 1bb - antes + 2^2";
-                engine.Rules[0].RoundPercent = 0;
-                engine.Rules[0].PushPercent = 100;
                 check("BetScript documented formula", engine.EvaluateScenario(scenario with { Antes = 8 }).Amount == 2, "");
                 engine.Rules[0].Formula = "x(1/2) + 1bb";
                 check("BetScript pot-size prefix", engine.EvaluateScenario(scenario with { Contributed = 0.5, EffectiveStack = 10 }).Amount == 4.75, "");
@@ -63,7 +60,8 @@ namespace PokerCaption
                     engine.Rules.Count == 2 && engine.Rules[1].Formula == "x(1/2) + 1bb" &&
                     loaded.Get(section, "bbSizeL0") == null && loaded.Get(section, "PushIfBetUsesEffStack") == null &&
                     loaded.Get(section, "Formula2") == null && loaded.Get(section, "Positions0") == null &&
-                    loaded.Get(section, "Comment0") == null, "");
+                    loaded.Get(section, "Comment0") == null && loaded.Get(section, "RoundBet0") == null &&
+                    loaded.Get(section, "PushIfBet0") == null, "");
             }
             finally { File.Delete(path); }
         }
@@ -85,10 +83,10 @@ namespace PokerCaption
                     form.Controls.Find("CheckBox554", true).Length == 0, "");
                 var list = (ListBox)form.Controls.Find("ListBox4", true).Single();
                 list.SelectedIndex = 1;
-                check("BetScript editor selects formula and default sizing",
+                check("BetScript editor restores the selected formula and removes the retired controls",
                     panel.Controls.Find("Edit16", true).Single().Text == "pot*0.33" &&
-                    panel.Controls.Find("Edit27", true).Single().Text == "0" &&
-                    panel.Controls.Find("Edit28", true).Single().Text == "100", "");
+                    new[] { "Edit27", "Edit28", "SpeedButton11", "SpeedButton12" }
+                        .All(name => form.Controls.Find(name, true).Length == 0), "");
                 var pages = DesktopWindow.GetWorkspace(form);
                 form.Opacity = 0;
                 form.ShowInTaskbar = false;
@@ -101,15 +99,6 @@ namespace PokerCaption
                     rules.Right < panel.Left && panel.Right <= panel.Parent.ClientRectangle.Right &&
                     new[] { rules, panel }.All(section => section.Controls.Cast<Control>().All(
                         control => section.ClientRectangle.Contains(control.Bounds))), "");
-
-                var round = (TextBox)panel.Controls.Find("Edit27", true).Single();
-                round.Text = "25";
-                check("BetScript editor saves rounding",
-                    form.ValidateChildren() && IniFile.Load(path).Get("AdvancedBets", "RoundBet1") == "25", "");
-                list.SelectedIndex = 0;
-                bool firstUnrounded = round.Text == "0";
-                list.SelectedIndex = 1;
-                check("BetScript editor restores rounding per rule", firstUnrounded && round.Text == "25", "");
 
                 var help = (Button)panel.Controls.Find("BetFormulaHelp", true).Single();
                 bool guideShown = false;
@@ -138,7 +127,7 @@ namespace PokerCaption
 
         internal static void CheckPrefill(Action<string, bool, string> check)
         {
-            var rule = new BetScriptEngine.Rule { Streets = 2, Formula = "pot / 2", RoundPercent = 100, PushPercent = 50 };
+            var rule = new BetScriptEngine.Rule { Streets = 2, Formula = "pot / 2" };
             using var service = new TableService(null, null);
             var legacy = new IniFile(null);
             legacy.Set("PokerCaption", "TableManagerOn", 1);
@@ -162,7 +151,7 @@ namespace PokerCaption
             bool skippedStaleScan = service.ApplyScannedBetScript(table, heroStackSeen: true) == null && editor.Text == "1";
             table.BetScriptScanTurn = table.BetScriptTurn;
             check("BetScript prefills a fresh turn with layout enabled and ignores the old toggle",
-                service.Manager.LayoutOnly && skippedStaleScan && preview.Text == "5" &&
+                service.Manager.LayoutOnly && skippedStaleScan && preview.Text == "2.5" &&
                 service.ApplyScannedBetScript(table, heroStackSeen: true) == preview.Text && editor.Text == preview.Text, editor.Text);
             editor.Text = "4";
             check("BetScript prefill preserves manual edits on the same turn",

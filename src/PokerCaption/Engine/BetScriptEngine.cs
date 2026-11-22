@@ -16,8 +16,6 @@ namespace PokerCaption.Engine
         {
             public int Streets;
             public string Formula;
-            public double RoundPercent;
-            public double PushPercent = 100;
             internal Rule Copy() => (Rule)MemberwiseClone();
         }
 

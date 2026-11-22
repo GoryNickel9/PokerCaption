@@ -73,10 +73,12 @@ internal static class DesktopWindow
             (OptionsPage(), "Options")
         };
         var navButtons = new List<Button>();
-        foreach (var (page, label) in pagesAndLabels)
+        for (int i = 0; i < pagesAndLabels.Length; i++)
         {
+            var (page, label) = pagesAndLabels[i];
+            page.TabIndex = i;
             pages.Controls.Add(page);
-            var link = Button("", label);
+            var link = Button("workspaceNav" + page.Name, label);
             link.AutoSize = false;
             link.Size = new Size(157, 40);
             link.TextAlign = ContentAlignment.MiddleLeft;
@@ -91,10 +93,12 @@ internal static class DesktopWindow
         }
         void SyncNavigation()
         {
-            int current = Math.Max(0, pages.SelectedIndex);
-            title.Text = pagesAndLabels[current].label;
             for (int i = 0; i < navButtons.Count; i++)
-                navButtons[i].BackColor = i == current ? Selected : Rail;
+            {
+                bool selected = pagesAndLabels[i].page == pages.SelectedPage;
+                navButtons[i].BackColor = selected ? Selected : Rail;
+                if (selected) title.Text = pagesAndLabels[i].label;
+            }
         }
         pages.PageChanged += (_, _) => SyncNavigation();
         pages.SelectPage(pagesAndLabels[0].page);
@@ -171,9 +175,6 @@ internal static class DesktopWindow
             Name = "ListBox4", AccessibleName = "Rules in priority order", Dock = DockStyle.Fill,
             IntegralHeight = false, HorizontalScrollbar = true, Margin = new Padding(0, 8, 0, 8)
         }, 0, 1);
-        rules.RowCount = 3;
-        rules.RowStyles.Insert(2, new RowStyle(SizeType.AutoSize));
-        rules.Controls.Add(Row(Button("SpeedButton11", "Move up"), Button("SpeedButton12", "Move down")), 0, 2);
         split.Controls.Add(rules, 0, 0);
 
         var editor = Editor(out var items);
@@ -190,8 +191,6 @@ internal static class DesktopWindow
         };
         streets.Items.AddRange(new object[] { "Preflop", "Flop", "Turn", "River" });
         items.Controls.Add(Labeled("Streets", streets));
-        items.Controls.Add(Row(Labeled("Round to (% of BB)", Field("Edit27", "Round to percent of big blind", 85)),
-            Labeled("Shove above (% of stack)", Field("Edit28", "Shove above percent of stack", 85))));
         return page;
     }
 
@@ -211,8 +210,8 @@ internal static class DesktopWindow
         var maximum = Field("Edit236", "Maximum", 50);
         maximum.Text = "3";
         contents.Controls.Add(Section("Table preferences",
-            Check("CheckBox90", "Never sit out on cash tables"), Row(max, maximum,
-                Spin("UpDown165", "Maximum", 1, 999, 3)), Check("CheckBox94", "Never sit out on tournament tables")));
+            Check("neverSitOut", "Never sit out"), Row(max, maximum,
+                Spin("UpDown165", "Maximum", 1, 999, 3))));
         contents.Controls.Add(Section("Table closure", Check("CheckBox173", "Auto close 'This table has been closed' tables"),
             Check("CheckBox401", "Auto close 'Play at this table has concluded' tables"),
             Check("CheckBox504", "Auto close 'Tournament is over' tables"),
@@ -402,21 +401,21 @@ internal static class DesktopWindow
     internal sealed class WorkspacePages : Panel
     {
         internal Control SelectedPage { get; private set; }
-        internal int SelectedIndex => SelectedPage == null ? -1 : Controls.IndexOf(SelectedPage);
         internal event EventHandler PageChanged;
 
         internal void SelectPage(Control page)
         {
-            if (page == SelectedPage) return;
+            bool changed = page != SelectedPage;
             SuspendLayout();
             try
             {
-                if (SelectedPage != null) SelectedPage.Visible = false;
                 SelectedPage = page;
-                page.Visible = true;
+                foreach (Control candidate in Controls)
+                    candidate.Visible = candidate == page;
+                page.BringToFront();
             }
             finally { ResumeLayout(); }
-            PageChanged?.Invoke(this, EventArgs.Empty);
+            if (changed) PageChanged?.Invoke(this, EventArgs.Empty);
         }
     }
 

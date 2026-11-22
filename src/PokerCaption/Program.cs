@@ -144,8 +144,8 @@ namespace PokerCaption
             controller.Build(connectToClient: false);
             var pages = DesktopWindow.GetWorkspace(controller.Form);
             if (args.Length >= 3 && int.TryParse(args[2], out int page) &&
-                page >= 0 && page < pages.Controls.Count)
-                pages.SelectPage(pages.Controls[page]);
+                pages.Controls.Cast<Control>().FirstOrDefault(c => c.TabIndex == page) is { } previewPage)
+                pages.SelectPage(previewPage);
             Application.Run(controller.Form);
             return 0;
         }
@@ -687,13 +687,27 @@ namespace PokerCaption
                 ui.ShowInTaskbar = false;
                 ui.Show();
                 Application.DoEvents();
-                bool restoredLayout = pages.SelectedPage.Name == "Table manager" &&
+                Button Navigation(string name) => (Button)ui.Controls.Find("workspaceNav" + name, true).Single();
+                bool IsWorkspace(string name, string heading, string controlName) =>
+                    pages.SelectedPage.Name == name &&
                     pages.Controls.Cast<Control>().Where(c => c.Visible).SequenceEqual([pages.SelectedPage]) &&
-                    ui.Controls.Find("workspaceHeading", true).Single().Text == "Table layout";
-                pages.SelectPage(pages.Controls["HUD"]);
-                Check("Desktop startup and navigation agree with visible workspace",
-                    restoredLayout && pages.Controls.Cast<Control>().Where(c => c.Visible).SequenceEqual([pages.SelectedPage]) &&
-                    ui.Controls.Find("workspaceHeading", true).Single().Text == "HUD");
+                    pages.SelectedPage.Controls.Find(controlName, true).Single().Visible &&
+                    ui.Controls.Find("workspaceHeading", true).Single().Text == heading &&
+                    Navigation(name).BackColor != Navigation(name == "HUD" ? "Options" : "HUD").BackColor;
+                var layoutPanel = new Panel { Name = "layoutTestContent", Dock = DockStyle.Fill };
+                pages.Controls["Table manager"].Controls.Add(layoutPanel);
+                bool restoredLayout = IsWorkspace("Table manager", "Table layout", layoutPanel.Name);
+                // WinForms can change its child order independently of sidebar order.
+                pages.Controls.SetChildIndex(pages.Controls["Options"], 0);
+                Navigation("HUD").PerformClick();
+                bool hud = IsWorkspace("HUD", "HUD", "hudActive");
+                Navigation("Table manager").PerformClick();
+                bool layout = IsWorkspace("Table manager", "Table layout", layoutPanel.Name);
+                Navigation("Betscript").PerformClick();
+                bool bets = IsWorkspace("Betscript", "BetScript", "ListBox4");
+                Navigation("Options").PerformClick();
+                Check("Desktop startup and sidebar keep the heading, highlight and page in sync after z-order changes",
+                    restoredLayout && hud && layout && bets && IsWorkspace("Options", "Options", "neverSitOut"));
                 Check("General HUD editor hides the retired controls",
                     new[] { "generalHudAlign", "generalHudResetPosition", "generalHudVisible", "generalHudBackInvisible",
                         "generalHudBorderWidth" }.All(name => ui.Controls.Find(name, true).Length == 0));

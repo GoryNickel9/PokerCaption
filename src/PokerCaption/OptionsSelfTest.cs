@@ -21,6 +21,10 @@ namespace PokerCaption
                 foreach (var name in UnavailableOptions)
                     check("Options unavailable " + name, Ctl(page, name) is { Enabled: false }, "");
 
+                check("Options keeps one disabled Never sit out control for cash and tournament tables",
+                    Ctl(page, "neverSitOut") is CheckBox { Text: "Never sit out", Enabled: false } &&
+                    Ctl(page, "CheckBox94") == null, "");
+
                 var retiredOptions = new[] { ("CheckBox13", "AutoTimebank"), ("cbAutoHideChat", "AutoHideChat"), ("CheckBox14", "StartMinimized"),
                     ("CheckBox82", "CloseCantFound"), ("UpDown38", "CNFafter") };
                 foreach (var (control, key) in retiredOptions)

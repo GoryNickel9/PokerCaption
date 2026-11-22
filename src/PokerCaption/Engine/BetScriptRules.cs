@@ -53,22 +53,9 @@ namespace PokerCaption.Engine
                 }
                 if (result.Hide) return new(i, null, "", null);
 
-                double amount = result.Value;
-                double step = rule.RoundPercent > 0 ? Math.Max(0.01, s.Bb * (rule.RoundPercent / 100)) : 0;
-                if (step > 0 && double.IsFinite(amount / step))
-                    amount = Math.Round(amount / step, MidpointRounding.AwayFromZero) * step;
-
-                double pushRatio = rule.PushPercent / 100;
-                if (max is double totalStack)
-                {
-                    if (amount > totalStack * pushRatio) amount = totalStack;
-                }
-                else if (amount > s.Stack * pushRatio || amount > s.Stack)
-                {
-                    // The remaining stack is a lower bound for the total stack.
-                    continue;
-                }
-                amount = Math.Clamp(amount, s.MinimumBet, max ?? s.Stack);
+                // The remaining stack is a lower bound when the current contribution is unknown.
+                if (!max.HasValue && result.Value > s.Stack) continue;
+                double amount = Math.Clamp(result.Value, s.MinimumBet, max ?? s.Stack);
                 return new(i, amount, FormulaEval.Format(amount, result.Decimals), null) { Decimals = result.Decimals };
             }
             return invalidRule ?? new(-1, null, null, null);
@@ -85,22 +72,11 @@ namespace PokerCaption.Engine
                 CultureInfo.InvariantCulture, out value) && double.IsFinite(value) && value >= 0;
         }
 
-        private static Rule ReadRule(IniFile ini, int index)
+        private static Rule ReadRule(IniFile ini, int index) => new()
         {
-            return new Rule
-            {
-                Streets = ini.GetInt(RuleSection, "Streets" + index),
-                Formula = ini.Get(RuleSection, "Formula" + index, ""),
-                RoundPercent = ReadPercent("RoundBet", 0),
-                PushPercent = ReadPercent("PushIfBet", 100),
-            };
-
-            double ReadPercent(string key, double fallback)
-            {
-                double value = ini.GetDouble(RuleSection, key + index, fallback);
-                return double.IsFinite(value) && value >= 0 ? value : fallback;
-            }
-        }
+            Streets = ini.GetInt(RuleSection, "Streets" + index),
+            Formula = ini.Get(RuleSection, "Formula" + index, ""),
+        };
 
         internal static void WriteRules(IniFile ini, IReadOnlyList<Rule> rules)
         {
@@ -112,18 +88,9 @@ namespace PokerCaption.Engine
             ini.Set(RuleSection, "Count", rules.Count);
             for (int i = 0; i < rules.Count; i++)
             {
-                int index = i;
                 var rule = rules[i];
                 ini.Set(RuleSection, "Streets" + i, rule.Streets);
                 ini.Set(RuleSection, "Formula" + i, rule.Formula ?? "");
-                Write("RoundBet", rule.RoundPercent == 0 ? null : rule.RoundPercent);
-                Write("PushIfBet", rule.PushPercent == 100 ? null : rule.PushPercent);
-
-                void Write(string key, double? value)
-                {
-                    if (value is double n)
-                        ini.Set(RuleSection, key + index, n.ToString(CultureInfo.InvariantCulture));
-                }
             }
         }
     }

@@ -31,7 +31,7 @@ namespace PokerCaption
 
         private static readonly string[] UnavailableOptions =
         {
-            "CheckBox90", "CheckBox94", "CheckBox279", "Edit236", "UpDown165",
+            "neverSitOut", "CheckBox279", "Edit236", "UpDown165",
         };
 
         private sealed record DialogRule(CheckBox Box, string Caption);

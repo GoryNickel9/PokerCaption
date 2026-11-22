@@ -1,11 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.Drawing;
-using System.Globalization;
 using System.Linq;
-using System.ComponentModel;
 using System.Windows.Forms;
-using PokerCaption.Config;
 using PokerCaption.Engine;
 
 namespace PokerCaption
@@ -26,8 +22,6 @@ namespace PokerCaption
                 var btnAdd = Ctl(f, "SpeedButton9") as Button;      // 'Add new bet'
                 var btnClone = Ctl(f, "SpeedButton13") as Button;   // 'Clone bet'
                 var btnDelete = Ctl(f, "SpeedButton10") as Button;  // 'Delete'
-                var btnUp = Ctl(f, "SpeedButton11") as Button;      // freccia su (sopra)
-                var btnDown = Ctl(f, "SpeedButton12") as Button;    // freccia giù (sotto)
 
                 if (list == null) { Log("betscript: ListBox4 mancante, wiring tab annullato"); return; }
 
@@ -37,10 +31,6 @@ namespace PokerCaption
                 else Log("betscript: SpeedButton13 (Clone bet) mancante");
                 if (btnDelete != null) btnDelete.Click += (s, e) => BetDelete(f);
                 else Log("betscript: SpeedButton10 (Delete) mancante");
-                if (btnUp != null) btnUp.Click += (s, e) => BetMove(f, -1);
-                else Log("betscript: SpeedButton11 (sposta su) mancante");
-                if (btnDown != null) btnDown.Click += (s, e) => BetMove(f, +1);
-                else Log("betscript: SpeedButton12 (sposta giù) mancante");
 
                 // selezione nella lista → pannello proprietà; doppio click → nuova regola
                 list.SelectedIndexChanged += (s, e) => BetSelectedChanged(f);
@@ -54,64 +44,11 @@ namespace PokerCaption
                 if (streets != null) streets.ItemCheck += (s, e) => BetStreetChanged(f, streets, e);
                 else Log("betscript: CheckListBox2 (Street) mancante");
 
-                WireBetOptions(f);
                 Ctl(f, "BetFormulaHelp").Click += (_, _) => ShowBetFormulaHelp(f);
 
                 BetSelectedChanged(f); // allinea il pannello alla selezione corrente
             }
             catch (Exception ex) { Log("betscript wiring ERR: " + ex.Message); }
-        }
-
-        private void WireBetOptions(Form form)
-        {
-            var errors = new ErrorProvider(form) { BlinkStyle = ErrorBlinkStyle.NeverBlink };
-            form.Disposed += (_, _) => errors.Dispose();
-            Ctl(form, "Edit27").Validating += Validate;
-            Ctl(form, "Edit28").Validating += Validate;
-
-            void Validate(object sender, CancelEventArgs e)
-            {
-                if (_betsPanelUpdating) return;
-                var input = (Control)sender;
-                var list = (ListBox)Ctl(form, "ListBox4");
-                int selected = list.SelectedIndex;
-                if (selected < 0) return;
-                var rules = LoadBetscriptRules();
-                if (selected >= rules.Count) return;
-                var rule = rules[selected];
-                bool isPush = input.Name == "Edit28";
-                double fallback = isPush ? 100 : 0;
-                if (!BetScriptEngine.TryReadAmount(input.Text, fallback, out double amount) ||
-                    amount != Math.Truncate(amount) || amount > int.MaxValue)
-                {
-                    Reject("Enter a non-negative whole percentage.");
-                    return;
-                }
-
-                bool changed = amount != (isPush ? rule.PushPercent : rule.RoundPercent);
-                if (isPush) rule.PushPercent = amount;
-                else rule.RoundPercent = amount;
-
-                try
-                {
-                    if (changed) SaveBetscriptIni(rules);
-                    input.Text = amount.ToString(CultureInfo.InvariantCulture);
-                    errors.SetError(input, "");
-                }
-                catch (Exception ex) { Reject(ex.Message); }
-
-                void Reject(string message)
-                {
-                    errors.SetError(input, message);
-                    e.Cancel = true;
-                }
-            }
-        }
-
-        private static void FillBetOptions(Form form, BetScriptEngine.Rule rule)
-        {
-            Ctl(form, "Edit27").Text = rule.RoundPercent.ToString(CultureInfo.InvariantCulture);
-            Ctl(form, "Edit28").Text = rule.PushPercent.ToString(CultureInfo.InvariantCulture);
         }
 
         // ---------- pannello proprietà ----------
@@ -142,7 +79,6 @@ namespace PokerCaption
                     if (streets != null)
                         for (int k = 0; k < streets.Items.Count; k++)
                             streets.SetItemChecked(k, (rules[i].Streets & (1 << k)) != 0);
-                    FillBetOptions(f, rules[i]);
                 }
                 finally { _betsPanelUpdating = false; }
             }
@@ -244,25 +180,6 @@ namespace PokerCaption
                 Log("betscript: eliminata regola " + (i + 1) + " (" + desc + ")");
             }
             catch (Exception ex) { Log("betscript delete ERR: " + ex.Message); }
-        }
-
-        private void BetMove(Form f, int delta)
-        {
-            try
-            {
-                var list = Ctl(f, "ListBox4") as ListBox;
-                if (list == null) return;
-                var rules = LoadBetscriptRules();
-                int i = list.SelectedIndex, j = i + delta;
-                if (i < 0 || i >= rules.Count) return;
-                if (j < 0 || j >= rules.Count) return;
-                (rules[i], rules[j]) = (rules[j], rules[i]);
-                SaveBetscriptIni(rules);
-                RefreshBetList(f, rules);
-                list.SelectedIndex = j;
-                Log("betscript: spostata regola " + (i + 1) + (delta < 0 ? " su" : " giù"));
-            }
-            catch (Exception ex) { Log("betscript move ERR: " + ex.Message); }
         }
 
         // ---------- lista e persistenza ----------
