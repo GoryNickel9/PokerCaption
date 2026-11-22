@@ -64,7 +64,7 @@ namespace PokerCaption.Engine
             TextsPotInBb = ini.GetBool("Sisal", "PotInBb", true);
 
             Betscript.Load(ini);
-            Manager.PreserveWindowSize = ClientProfile.Interaction == "coords";
+            Manager.RenderedClient = ClientProfile.Interaction == "coords";
             Manager.Load(ini);
             AutoDialog.Load(ini);
             SetCloseTournamentLobby(ini.GetBool("PokerCaption", "CloseTrnyLobby", false));
@@ -210,6 +210,7 @@ namespace PokerCaption.Engine
                     t.Ante = lt.Ante;
                     t.MaxSeats = lt.MaxSeats;
                     t.TableName = lt.TableName;
+                    if (!string.Equals(t.HeroNick, lt.HeroNick, StringComparison.OrdinalIgnoreCase)) t.HeroSeat = 0;
                     t.HeroNick = lt.HeroNick;
                     NativeMethods.GetWindowRect(t.Hwnd, out t.Rect);
                 }
@@ -285,6 +286,7 @@ namespace PokerCaption.Engine
             double bb = t.Bb > 0 ? t.Bb : 1.0;
             double ToUnits(double v) => TextsPotInBb ? v * bb : v;
             bool heroStackSeen = false;
+            NativeMethods.GetClientRect(t.Hwnd, out var client);
 
             foreach (var (rect, text, node, seat) in texts)
             {
@@ -306,8 +308,18 @@ namespace PokerCaption.Engine
                     var amount = System.Text.RegularExpressions.Regex.Match(text, @"^[\d.,]+");
                     if (amount.Success)
                     {
-                        t.SeatStacks[seat] = ToUnits(TitleParser.ParseMoney(amount.Value));
+                        double stack = ToUnits(TitleParser.ParseMoney(amount.Value));
+                        t.SeatStacks[seat] = stack;
                         t.SeatBounds[seat] = rect;
+                        var hero = Pixels.HeroRect;
+                        if (!string.IsNullOrEmpty(t.HeroNick) && client.Right > 0 && client.Bottom > 0 &&
+                            hero.Contains((rect.Left + rect.Width / 2f) / client.Right,
+                                (rect.Top + rect.Height / 2f) / client.Bottom))
+                        {
+                            t.HeroSeat = seat;
+                            t.Stack = stack;
+                            heroStackSeen = stack > 0;
+                        }
                     }
                 }
                 if (seat != 0 && node == "PlayerAction")
@@ -321,21 +333,6 @@ namespace PokerCaption.Engine
                     var call = System.Text.RegularExpressions.Regex.Match(text, @"^Call\s+([\d.,]+)",
                         System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                     if (call.Success) t.AmountToCall = ToUnits(TitleParser.ParseMoney(call.Groups[1].Value));
-                }
-                // stack hero: testo "N BB" nella regione hero
-                var stack = System.Text.RegularExpressions.Regex.Match(text, @"^([\d.,]+)\s*(BB|€|\$)");
-                if (stack.Success && TitleParser.ParseMoney(stack.Groups[1].Value) > 0)
-                {
-                    double cx = rect.Left + rect.Width / 2.0, cy = rect.Top + rect.Height / 2.0;
-                    int w = t.Rect.Right - t.Rect.Left, h = t.Rect.Bottom - t.Rect.Top;
-                    var hr = Pixels.HeroRect;
-                    if (w > 0 && h > 0 &&
-                        cx >= hr.X * w && cx <= (hr.X + hr.Width) * w &&
-                        cy >= hr.Y * h && cy <= (hr.Y + hr.Height) * h)
-                    {
-                        t.Stack = ToUnits(TitleParser.ParseMoney(stack.Groups[1].Value));
-                        heroStackSeen = true;
-                    }
                 }
             }
             if (scanStatus != SharedMemory.CocosScanStatus.Walked) return;

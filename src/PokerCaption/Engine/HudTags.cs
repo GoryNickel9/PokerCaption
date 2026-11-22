@@ -103,8 +103,12 @@ namespace PokerCaption.Engine
             if (c.SeatNumber > 0 && baseTag == "stack")
                 return t != null && t.SeatStacks.TryGetValue(c.SeatNumber, out double stack)
                     ? (inBb ? BbOf(stack) : stack.ToString("0.##")) : "";
-            if (baseTag is "actions" or "action") return t?.ActionHistory.Format(c.SeatNumber, Program.Ini) ?? "";
-            if (lower == "timing") return t?.ActionHistory.LastTiming(c.SeatNumber) ?? "";
+            if (baseTag is "actions" or "action" or "timing")
+            {
+                if (t == null || c.SeatNumber == t.HeroSeat) return "";
+                return baseTag == "timing" ? t.ActionHistory.LastTiming(c.SeatNumber) :
+                    t.ActionHistory.Format(c.SeatNumber, Program.Ini);
+            }
 
             // varianti _bb
             if (inBb)

@@ -177,7 +177,11 @@ internal static class DesktopWindow
         var page = new TabPage("Betscript") { BackColor = Canvas };
         var layout = PageLayout();
         page.Controls.Add(layout);
-        layout.Controls.Add(Row(Check("CheckBox72", "Enable BetScript", true)), 0, 0);
+        layout.Controls.Add(Row(Check("CheckBox72", "Enable BetScript", true), new Label
+        {
+            Name = "BetscriptLayoutNotice", Text = "Paused while Table Manager is enabled on Sisal.",
+            AutoSize = true, Visible = false, Margin = new Padding(10, 6, 0, 0)
+        }), 0, 0);
         var split = Columns(282);
         split.Margin = new Padding(0, 12, 0, 0);
         layout.Controls.Add(split, 0, 1);
@@ -240,29 +244,53 @@ internal static class DesktopWindow
             Check("CheckBox283", "Close tournament lobby when its last table closes"),
             Check("CheckBox549", "Auto close table in waiting list")));
 
-        var dialogs = Section("Dialogs");
-        var rules = (FlowLayoutPanel)dialogs.Controls[0];
-        foreach (var (name, caption) in DialogRules)
-        {
-            var check = Check(name, $"Close '{caption}'");
-            if (name == "CheckBox82")
-                rules.Controls.Add(Row(check, Field("Edit39", "Delay in seconds", 44),
-                    Spin("UpDown38", "Delay in seconds", 0, 20, 1), Heading("s", 10, Ink)));
-            else rules.Controls.Add(check);
-        }
+        var dialogItems = DialogRules.Select(rule => Check(rule.name, $"Close '{rule.caption}'")).ToList();
         foreach (var (name, caption) in new[]
         {
             ("CheckBox390", "Confirm Waiting List"), ("CheckBox316", "Close Current Session Information"),
             ("CheckBox208", "Keep playing in Current Session"), ("CheckBox50", "Stay connected on inactivity timeout")
-        }) rules.Controls.Add(Check(name, caption));
-        contents.Controls.Add(dialogs);
-        contents.SizeChanged += (_, _) =>
+        }) dialogItems.Add(Check(name, caption));
+
+        var columns = new TableLayoutPanel
         {
-            int maxWidth = Math.Max(280, contents.ClientSize.Width - 45);
-            foreach (var box in Descendants(dialogs).OfType<CheckBox>())
-                box.MaximumSize = new Size(box.Name == "CheckBox82" ? maxWidth - 145 : maxWidth, 0);
+            Name = "dialogColumns", Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, RowCount = 1,
+            Margin = Padding.Empty
         };
+        columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        int splitAt = (dialogItems.Count + 1) / 2;
+        for (int i = 0; i < 2; i++)
+        {
+            var column = Stack();
+            column.Dock = DockStyle.Top;
+            column.Padding = new Padding(0, 0, 8, 0);
+            column.Controls.AddRange((i == 0 ? dialogItems.Take(splitAt) : dialogItems.Skip(splitAt)).ToArray());
+            columns.Controls.Add(column, i, 0);
+        }
+        var dialogs = new GroupBox
+        {
+            Text = "Dialogs", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Dock = DockStyle.Top, BackColor = Color.White, ForeColor = Ink, Padding = new Padding(12, 7, 12, 8)
+        };
+        dialogs.Controls.Add(columns);
+        contents.Controls.Add(dialogs);
+        scroll.ClientSizeChanged += (_, _) => FitDialogColumns();
+        FitDialogColumns();
         return page;
+
+        void FitDialogColumns()
+        {
+            int maxWidth = Math.Max(220, (scroll.ClientSize.Width - 46) / 2 - 20);
+            foreach (var box in dialogItems)
+            {
+                int checkWidth = box.GetPreferredSize(Size.Empty).Width -
+                    TextRenderer.MeasureText(box.Text, box.Font).Width;
+                int textHeight = TextRenderer.MeasureText(box.Text, box.Font,
+                    new Size(maxWidth - Math.Max(checkWidth, 20), int.MaxValue), TextFormatFlags.WordBreak).Height;
+                box.AutoSize = false;
+                box.Size = new Size(maxWidth, Math.Max(box.GetPreferredSize(Size.Empty).Height, textHeight + 4));
+            }
+        }
     }
 
     private static readonly (string name, string caption)[] DialogRules =
@@ -271,14 +299,13 @@ internal static class DesktopWindow
         ("cbStarsAccountInfo", "Stars Account Information"), ("CheckBox532", "Chest Announcement"),
         ("CheckBox472", "Active Session Reminder"), ("CheckBox421", "Reminder: Your current sesson has been active for X hours"),
         ("CheckBox477", "Feedback for PokerStars"), ("CheckBox508", "Responsible Gaming"),
-        ("CheckBox469", "Find Seat (Cash Games)"), ("CheckBox264", "Seat Me / All seats have been taken"),
         ("CheckBox506", "You have been successfully removed from all the waiting lists"),
         ("CheckBox500", "You reached the cap of cash game tables"),
         ("CheckBox313", "You are playing at too many tables"),
         ("CheckBox312", "You are currently playing the maximum allowed Zoom tables at once"),
         ("CheckBox452", "Your auto-rebuy was restricted to"), ("CheckBox327", "table is closed"),
         ("CheckBox89", "You did not act in time, this seat is no longer reserved for you"),
-        ("CheckBox372", "You have been unregistered from"), ("CheckBox82", "Player cannot be found"),
+        ("CheckBox372", "You have been unregistered from"),
         ("CheckBox41", "Tournament Registration / Show Lobby"),
         ("CheckBox63", "Tournament Registration / Welcome to the tournament"),
         ("CheckBox170", "Would you like to register into another Satellite?")

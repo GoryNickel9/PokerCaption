@@ -28,17 +28,12 @@ namespace PokerCaption
         // (apply iniziale / load backup) gli eventi di cambio devono restare inerti
         private bool _tabsSync;
 
-        private static readonly Dictionary<string, (string Field, string Spinner, string Key)> DialogDelayControls = new()
-        {
-            ["CheckBox82"] = ("Edit39", "UpDown38", "CNFafter"),
-        };
-
         private static readonly string[] UnavailableOptions =
         {
             "CheckBox90", "CheckBox94", "CheckBox279", "Edit236", "UpDown165", "CheckBox549",
         };
 
-        private sealed record DialogRule(CheckBox Box, string Caption, TextBox Delay, NumericUpDown Spinner, string LegacyKey, string DelayKey);
+        private sealed record DialogRule(CheckBox Box, string Caption, string LegacyKey);
         private readonly List<DialogRule> _dialogRules = new List<DialogRule>();
 
         private static readonly (string Control, string Key, bool Default)[] OptionsFlags =
@@ -171,76 +166,25 @@ namespace PokerCaption
                 var match = captionPattern.Match(box.Text.Trim());
                 if (!match.Success) continue;
 
-                TextBox delay = null;
-                NumericUpDown spinner = null;
-                if (DialogDelayControls.TryGetValue(box.Name, out var fields))
-                {
-                    delay = Ctl(page, fields.Field) as TextBox;
-                    spinner = Ctl(page, fields.Spinner) as NumericUpDown;
-                }
-
                 var legacy = box.Name switch
                 {
                     "cbCloseMyNews" => "CloseMyNews",
                     "cbCloseLogoutInfo" => "CloseLogoutInfo",
                     "cbStarsAccountInfo" => "StarsAccountInfo",
                     "CheckBox41" => "TrnyRegShowLobbyClose",
-                    "CheckBox82" => "CloseCantFound",
                     _ => null,
                 };
-                var rule = new DialogRule(box, match.Groups[1].Value.Trim(), delay, spinner, legacy, fields.Key);
+                var rule = new DialogRule(box, match.Groups[1].Value.Trim(), legacy);
                 _dialogRules.Add(rule);
                 box.CheckedChanged += (_, _) =>
                 {
                     if (!_tabsSync) UpdateDialogRule(rule);
                 };
-                if (delay != null && spinner != null)
-                    WireDialogDelay(rule);
             }
 
             Program.Service?.AutoDialog.SetOptionCaptions(_dialogRules.Select(rule => rule.Caption));
             SyncDialogsFromIni();
             Log("Dialogs: " + _dialogRules.Count + " checkbox collegate a [AutoDialog]");
-        }
-
-        private const int MaxDelaySeconds = 20; // Form1 UpDown38.Max.
-
-        private static bool TryReadDelay(TextBox field, out int value)
-        {
-            value = 0;
-            string separator = CultureInfo.CurrentCulture.NumberFormat.NumberGroupSeparator;
-            var text = (separator.Length == 0 ? field.Text : field.Text.Replace(separator, "", StringComparison.Ordinal)).AsSpan();
-            bool negative = !text.IsEmpty && text[0] == '-';
-            if (negative) text = text[1..];
-            foreach (char digit in text)
-            {
-                if (digit is < '0' or > '9') return false;
-                value = Math.Min(MaxDelaySeconds, value * 10 + digit - '0');
-            }
-            if (negative) value = 0;
-            return true;
-        }
-
-        private void WireDialogDelay(DialogRule rule)
-        {
-            var spinner = rule.Spinner;
-            var field = rule.Delay;
-            spinner.Minimum = 0;
-            spinner.Maximum = MaxDelaySeconds;
-            if (TryReadDelay(field, out int initial)) spinner.Value = initial;
-            spinner.ValueChanged += (_, _) =>
-            {
-                if (!_tabsSync) field.Text = spinner.Value.ToString(CultureInfo.InvariantCulture);
-            };
-            field.TextChanged += (_, _) =>
-            {
-                if (_tabsSync || !TryReadDelay(field, out int value)) return;
-                _tabsSync = true;
-                try { spinner.Value = value; }
-                finally { _tabsSync = false; }
-                Program.Ini.Set("PokerCaption", rule.DelayKey, value);
-                if (rule.Box.Checked) UpdateDialogRule(rule);
-            };
         }
 
         private static List<(string Caption, int Delay)> ReadDialogRules()
@@ -273,22 +217,11 @@ namespace PokerCaption
                     if (entry.Caption == null && rule.LegacyKey != null &&
                         Program.Ini.GetBool("PokerCaption", rule.LegacyKey, false))
                     {
-                        int seconds = rule.Spinner == null ? 0 : Math.Clamp(
-                            Program.Ini.GetInt("PokerCaption", rule.DelayKey, (int)rule.Spinner.Value), 0, MaxDelaySeconds);
-                        entry = (rule.Caption, seconds * 1000);
+                        entry = (rule.Caption, 0);
                         saved.Add(entry);
                         migrated = true;
                     }
                     rule.Box.Checked = entry.Caption != null;
-                    if (rule.Spinner != null)
-                    {
-                        int delay = rule.Box.Checked
-                            ? entry.Delay / 1000
-                            : Program.Ini.GetInt("PokerCaption", rule.DelayKey, (int)rule.Spinner.Value);
-                        int seconds = Math.Clamp(delay, 0, MaxDelaySeconds);
-                        rule.Spinner.Value = seconds;
-                        rule.Delay.Text = seconds.ToString(CultureInfo.InvariantCulture);
-                    }
                 }
             }
             finally { _tabsSync = syncing; }
@@ -299,14 +232,9 @@ namespace PokerCaption
         {
             var rules = ReadDialogRules();
             int index = rules.FindIndex(x => string.Equals(x.Caption, rule.Caption, StringComparison.OrdinalIgnoreCase));
-            int seconds = rule.Delay == null ? 0 : TryReadDelay(rule.Delay, out int value) ? value : Math.Clamp(
-                Program.Ini.GetInt("PokerCaption", rule.DelayKey, (int)rule.Spinner.Value), 0, MaxDelaySeconds);
-            if (rule.DelayKey != null) Program.Ini.Set("PokerCaption", rule.DelayKey, seconds);
             if (rule.Box.Checked)
             {
-                var entry = (rule.Caption, seconds * 1000);
-                if (index < 0) rules.Add(entry);
-                else rules[index] = entry;
+                if (index < 0) rules.Add((rule.Caption, 0));
             }
             else
             {

@@ -28,13 +28,11 @@ namespace PokerCaption.Engine
         private static readonly DialogAction TournamentEnded = new("Tournament is over", 0, TableCloseReason.TournamentEnded);
         private const string ReminderCaption = "Reminder: Your current sesson has been active for X hours";
         private const string FeedbackCaption = "Feedback for PokerStars";
-        private const string PlayerNotFoundCaption = "Player cannot be found";
         private const string RegistrationCaption = "Tournament Registration / Welcome to the tournament";
         private const string ShowLobbyCaption = "Tournament Registration / Show Lobby";
         private const string RegistrationTitle = "Tournament Registration";
         private const string PokerStarsRegistrationButtonClass = "PokerStarsButtonClass";
         private const string FlutterRegistrationButtonClass = "FlutterOnlinePokerButtonClass";
-        private const string SeatTakenCaption = "Seat Me / All seats have been taken";
         private const string NativeDialogClass = "#32770";
         private const string EmbeddedBrowserClass = "RationalEmbeddedBrowserWindowClass";
         private const uint WmGetText = 0x000D;
@@ -52,14 +50,16 @@ namespace PokerCaption.Engine
         private static readonly Regex Whitespace = new(@"\s+", RegexOptions.CultureInvariant);
         private static readonly HashSet<string> ExactDialogTitles = new(StringComparer.Ordinal)
         {
-            "Chest Announcement", "Active Session Reminder", "Find Seat (Cash Games)",
-            "Stars Account Information", "PokerStars Logout Information", "My News", SeatTakenCaption,
+            "Chest Announcement", "Active Session Reminder", "Stars Account Information",
+            "PokerStars Logout Information", "My News",
         };
 
         // Old [AutoDialog] rows otherwise fall back to generic title matching.
         private static readonly HashSet<string> RemovedOptionCaptions = new(StringComparer.OrdinalIgnoreCase)
         {
             "Find a Player", "Table Cap Reached", "This seat is reserved for players on the waiting list", "This seat is occupied",
+            "Player cannot be found",
+            "Find Seat (Cash Games)", "Seat Me / All seats have been taken", "Seat Me",
         };
         private static readonly (string Key, string Title, string Button)[] ButtonOptions =
         {
@@ -197,7 +197,7 @@ namespace PokerCaption.Engine
         {
             if (!_optionCaptions.TryGetValue(caption, out var optionCaption))
                 return title.Contains(caption, StringComparison.OrdinalIgnoreCase);
-            if (optionCaption is ReminderCaption or FeedbackCaption or PlayerNotFoundCaption) return false;
+            if (optionCaption is ReminderCaption or FeedbackCaption) return false;
             if (ExactDialogTitles.Contains(optionCaption))
                 return MatchesOriginalTitle(title, windowClass, optionCaption);
             return isDialog && MatchesOptionText(Normalize(title), optionCaption);
@@ -205,7 +205,7 @@ namespace PokerCaption.Engine
 
         private static bool MatchesOriginalTitle(string title, string windowClass, string caption)
         {
-            if (!title.Equals(caption == SeatTakenCaption ? "Seat Me" : caption, StringComparison.Ordinal)) return false;
+            if (!title.Equals(caption, StringComparison.Ordinal)) return false;
             if (windowClass == EmbeddedBrowserClass) return caption is "My News" or "Chest Announcement";
             return windowClass == NativeDialogClass && caption != "Chest Announcement";
         }
@@ -240,7 +240,7 @@ namespace PokerCaption.Engine
                 MatchesDialogBody(title, body, text, windowClass, caption));
         }
 
-        private static bool UsesCombinedBody(string caption) => caption is ReminderCaption or FeedbackCaption or PlayerNotFoundCaption;
+        private static bool UsesCombinedBody(string caption) => caption is ReminderCaption or FeedbackCaption;
 
         private static bool MatchesDialogBody(string title, string body, string normalized, string windowClass, string caption) => caption switch
         {
@@ -249,8 +249,6 @@ namespace PokerCaption.Engine
                  body.StartsWith("Reminder: Your current session", StringComparison.Ordinal)),
             FeedbackCaption => windowClass == NativeDialogClass && title.Length == 0 &&
                 body.StartsWith("FeedbackforPokerStars", StringComparison.Ordinal),
-            PlayerNotFoundCaption => windowClass == NativeDialogClass && title == "Find a Player" &&
-                Whitespace.Replace(body, "").Contains("cannotbefound", StringComparison.Ordinal),
             _ => MatchesOptionText(normalized, caption),
         };
 

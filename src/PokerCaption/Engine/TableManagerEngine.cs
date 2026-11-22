@@ -8,6 +8,7 @@ public sealed class TableManagerEngine
 {
     private readonly Action<string> _log;
     private readonly Func<IntPtr, Rectangle, bool> _place;
+    private readonly Dictionary<int, Rectangle> _geometryPreview = new();
     private readonly Dictionary<TableInfo, Placement> _placements = new();
     private long _nextSort;
     private const int MoveRetryMs = 1000;
@@ -27,8 +28,8 @@ public sealed class TableManagerEngine
     public bool Enabled => _enabled;
     public TableManagerConfig Config { get; private set; }
     public string ConfigDir { get; set; }
-    internal bool PreserveWindowSize { get; set; }
-    internal bool LayoutOnly => Enabled && PreserveWindowSize;
+    internal bool RenderedClient { get; set; }
+    internal bool LayoutOnly => Enabled && RenderedClient;
     internal event Action LayoutModeChanged;
 
     public TableManagerEngine(Action<string> log) : this(log, null) { }
@@ -36,8 +37,15 @@ public sealed class TableManagerEngine
     internal TableManagerEngine(Action<string> log, Func<IntPtr, Rectangle, bool> place)
     {
         _log = log ?? (_ => { });
-        _place = place ?? PlaceWindow;
+        _place = place;
     }
+
+    internal void PreviewGeometry(int slot, TableManagerConfig.Slot geometry) =>
+        _geometryPreview[slot] = new Rectangle(geometry.Left, geometry.Top, geometry.Width, geometry.EffectiveHeight);
+
+    internal void ClearGeometryPreview() => _geometryPreview.Clear();
+
+    internal void ClearGeometryPreview(int slot) => _geometryPreview.Remove(slot);
 
     public void Load(IniFile ini)
     {
@@ -45,6 +53,7 @@ public sealed class TableManagerEngine
         ConfigName = ini.Get("PokerCaption", "TableManagerConfig", "4x");
         _enabled = ini.GetBool("PokerCaption", "TableManagerOn", false);
         Config = null;
+        ClearGeometryPreview();
         foreach (var table in _placements.Keys) ClearSlot(table);
         _placements.Clear();
         _nextSort = 0;
@@ -92,8 +101,8 @@ public sealed class TableManagerEngine
             }
         }
 
-        if (Config.AutoSortTables && sortInputsChanged)
-            _nextSort = now + Config.AutoSortTime;
+        if (sortInputsChanged)
+            _nextSort = now + TableManagerConfig.AutoSortDelayMs;
         bool sort = _nextSort != 0 && now >= _nextSort;
         if (sort)
         {
@@ -159,12 +168,15 @@ public sealed class TableManagerEngine
                 else
                 {
                     var slot = slots[table.PlacedSlot];
-                    var bounds = new Rectangle(slot.Left, slot.Top, slot.Width, slot.EffectiveHeight);
-                    if ((sort || state.Bounds != bounds) && now >= state.NextMove)
+                    if (state.Active >= 0 || !_geometryPreview.TryGetValue(table.PlacedSlot, out var bounds))
+                        bounds = new Rectangle(slot.Left, slot.Top, slot.Width, slot.EffectiveHeight);
+                    bool geometryChanged = state.Bounds != bounds;
+                    if (now >= state.NextMove && (sort || geometryChanged ||
+                        (_place == null && PositionChanged(table.Hwnd, bounds.Location))))
                     {
-                        bool placed = _place(table.Hwnd, bounds);
+                        bool placed = _place?.Invoke(table.Hwnd, bounds) ?? PlaceWindow(table.Hwnd, bounds, geometryChanged || sort);
                         if (placed) state.Bounds = bounds;
-                        if (PreserveWindowSize || !placed) state.NextMove = now + MoveRetryMs;
+                        state.NextMove = placed ? (_place == null ? now + 150 : now) : now + MoveRetryMs;
                     }
                 }
             }
@@ -203,23 +215,21 @@ public sealed class TableManagerEngine
         table.TablesInSlot = 1;
     }
 
-    private bool PlaceWindow(IntPtr hwnd, Rectangle bounds)
+    private static bool PositionChanged(IntPtr hwnd, Point expected) =>
+        NativeMethods.GetWindowRect(hwnd, out var rect) && (rect.Left != expected.X || rect.Top != expected.Y);
+
+    private static bool PlaceWindow(IntPtr hwnd, Rectangle bounds, bool resize)
     {
         if (NativeMethods.IsIconic(hwnd) || NativeMethods.IsZoomed(hwnd) ||
-            NativeMethods.IsHungAppWindow(hwnd) || !NativeMethods.GetWindowRect(hwnd, out var current))
+            NativeMethods.IsHungAppWindow(hwnd) || NativeMethods.IsInMoveSize(hwnd) ||
+            !NativeMethods.GetWindowRect(hwnd, out var current))
             return false;
 
         const uint asyncMove = 0x4014; // SWP_ASYNCWINDOWPOS | SWP_NOZORDER | SWP_NOACTIVATE
         const uint moveOnly = 0x0001; // SWP_NOSIZE
-        if (PreserveWindowSize)
-        {
-            if (current.Left == bounds.X && current.Top == bounds.Y) return true;
-            bool queued = NativeMethods.SetWindowPos(hwnd, IntPtr.Zero, bounds.X, bounds.Y, 0, 0, asyncMove | moveOnly);
-            if (queued) _log($"TM: richiesto spostamento at {bounds.X},{bounds.Y} (dimensioni invariate)");
-            return queued;
-        }
-
-        return Rectangle.FromLTRB(current.Left, current.Top, current.Right, current.Bottom) == bounds ||
-            NativeMethods.SetWindowPos(hwnd, IntPtr.Zero, bounds.X, bounds.Y, bounds.Width, bounds.Height, asyncMove);
+        bool samePosition = current.Left == bounds.X && current.Top == bounds.Y;
+        bool sameSize = current.Right - current.Left == bounds.Width && current.Bottom - current.Top == bounds.Height;
+        return (samePosition && (!resize || sameSize)) || NativeMethods.SetWindowPos(hwnd, IntPtr.Zero,
+            bounds.X, bounds.Y, bounds.Width, bounds.Height, resize && !sameSize ? asyncMove : asyncMove | moveOnly);
     }
 }

@@ -12,6 +12,8 @@
     <Prefer32Bit>false</Prefer32Bit>
     <AssemblyName>PokerCaption</AssemblyName>
     <Product>PokerCaption</Product>
+    <ProgramIconScript>$(MSBuildProjectDirectory)\..\..\tools\New-ProgramIcon.ps1</ProgramIconScript>
+    <ApplicationIcon>$(MSBuildProjectDirectory)\obj\PokerCaption.ico</ApplicationIcon>
     <RootNamespace>PokerCaption</RootNamespace>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
@@ -27,6 +29,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="$(ApplicationIcon)" LogicalName="PokerCaption.ProgramIcon" />
     <!-- DLL native incluse nell'output (x86 per client 32-bit, x64 per 64-bit) -->
     <None Include="..\..\native\bin\x86\captionHook.dll" CopyToOutputDirectory="PreserveNewest" Link="native\x86\captionHook.dll" />
     <None Include="..\..\native\bin\x64\captionHook.dll" CopyToOutputDirectory="PreserveNewest" Link="native\x64\captionHook.dll" />
@@ -34,5 +37,10 @@
     <!-- profilo skin + dump UIA (nick pre-tavolo) -->
     <None Include="..\..\tools\dump_uia.ps1" CopyToOutputDirectory="PreserveNewest" Link="tools\dump_uia.ps1" />
   </ItemGroup>
+
+  <Target Name="GenerateProgramIcon" BeforeTargets="PrepareForBuild"
+          Inputs="$(ProgramIconScript)" Outputs="$(ApplicationIcon)">
+    <Exec Command="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(ProgramIconScript)&quot; -OutputPath &quot;$(ApplicationIcon)&quot;" />
+  </Target>
 
 </Project>

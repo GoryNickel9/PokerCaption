@@ -55,6 +55,7 @@ namespace PokerCaption.Engine
         private readonly Dictionary<IntPtr, Dictionary<(int seat, int panel), HudTextPanel>> _perPlayer = new();
         private readonly Dictionary<IntPtr, HudTextPanel> _bbBoxes = new();
         private readonly Action<string> _log;
+        private const int PlayerPanelStartInset = 24;
         private IniFile _ini;
         private Random _rng = new Random();
         private int _handId, _streetId, _heroActId;
@@ -381,7 +382,7 @@ namespace PokerCaption.Engine
                         {
                             (text, def.FontColor, Color.Empty, def.FontSize, true)
                         }, Padding.Empty);
-                        var defaultPosition = new Point(origin.X + anchor.Left + (anchor.Width - panel.Width) / 2, y);
+                        var defaultPosition = new Point(origin.X + anchor.Left + anchor.Width / 2 - PlayerPanelStartInset, y);
                         panel.Tag = defaultPosition;
                         if (!panel.Dragging)
                         {

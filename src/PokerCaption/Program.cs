@@ -484,6 +484,11 @@ namespace PokerCaption
                 timed.Format(3, timingIni) == "P 0sC 1.2s" && timed.Format(5, timingIni) == "R 0.3s" &&
                 timed.Format(3, null) == "PC" &&
                 HudTags.Resolve("[timing]", new TagContext { Table = timedTable, SeatNumber = 3 }) == "1.2");
+            timedTable.HeroSeat = 3;
+            timedTable.SeatStacks[3] = 42;
+            Check("Player HUD hides hero actions and timing while keeping stack data and opponent timing",
+                HudTags.Resolve("[stack] [actions][timing]", new TagContext { Table = timedTable, SeatNumber = 3 }) == "42 " &&
+                HudTags.Resolve("[timing]", new TagContext { Table = timedTable, SeatNumber = 5 }) == "0.3");
             timed.Observe(1, 3, 15, missing, events: Array.Empty<SharedMemory.SeatActionEvent>(), snapshotTick: 5000);
             timed.Observe(1, 3, 20, missing, events: new SharedMemory.SeatActionEvent[]
             {
@@ -591,6 +596,13 @@ namespace PokerCaption
                 RefreshPlayerPanels();
                 Check("Player HUD disables drag when Lock HUD is checked",
                     Application.OpenForms.OfType<HudTextPanel>().SingleOrDefault(p => p.Visible) is { Draggable: false });
+                var lockedPanel = Application.OpenForms.OfType<HudTextPanel>().SingleOrDefault(p => p.Visible);
+                var lockedPosition = lockedPanel?.Location;
+                int shortWidth = lockedPanel?.Width ?? 0;
+                dragHud.Panels.Single(p => p.PlayerPanel).Format = "C 1.6sC 1.5s|X 6.2s";
+                RefreshPlayerPanels();
+                Check("Player HUD growing text keeps its locked position", lockedPanel != null && lockedPanel.Width > shortWidth &&
+                    lockedPanel.Location == lockedPosition);
             }
 
             // --- SeedFrom: il profilo non deve riscrivere le sezioni esistenti ---
@@ -623,8 +635,13 @@ namespace PokerCaption
                     picker.Controls.Find("ListBox1", true).Single() is ListBox &&
                     picker.AcceptButton != null && picker.CancelButton != null);
             using (var actions = new ActionsTagConfigForm(new IniFile(null), null))
-                Check("Action symbols dialog exposes its grid",
-                    DesktopWindow.Descendants(actions).OfType<DataGridView>().Single().Rows.Count > 0);
+            {
+                var controls = DesktopWindow.Descendants(actions).ToArray();
+                var grid = controls.OfType<DataGridView>().Single();
+                Check("Action symbols dialog keeps symbol editing and only the timing toggle", grid.Rows.Count > 0 &&
+                    grid.Columns.Cast<DataGridViewColumn>().Select(column => column.HeaderText).SequenceEqual(["Action", "Symbol"]) &&
+                    controls.OfType<CheckBox>().Select(box => box.Text).SequenceEqual(["Add timings"]));
+            }
 
             File.WriteAllText(Path.Combine(AppDir, "selftest2.txt"), sb.ToString());
             Console.Write(sb.ToString());

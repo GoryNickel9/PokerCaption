@@ -117,8 +117,9 @@ namespace PokerCaption
                     if (dialog == null) return;
                     try
                     {
-                        var guide = (TextBox)dialog.Controls.Find("FormulaGuideText", true).Single();
-                        guideShown = guide.ReadOnly && guide.Text.Contains("x1") && guide.Text.Contains("effStack");
+                        var guide = (RichTextBox)dialog.Controls.Find("FormulaGuideText", true).Single();
+                        guideShown = guide.ReadOnly && guide.Text.Contains("x1") && guide.Text.Contains("effStack") &&
+                            new[] { "OPERATORS", "TABLE VALUES", "EXAMPLES", "DISPLAY" }.All(guide.Lines.Contains);
                     }
                     finally { dialog.Close(); }
                 });

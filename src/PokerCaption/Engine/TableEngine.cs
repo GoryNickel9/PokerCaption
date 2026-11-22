@@ -40,6 +40,7 @@ namespace PokerCaption.Engine
 
         // --- Sisal / client renderizzato (dal titolo finestra) ---
         public string HeroNick = "";          // "Logged In as <nick>"
+        internal int HeroSeat;
         public double Ante;
         public bool IsPlayMoney;
         public bool ShortDeck;                // variante "6+"

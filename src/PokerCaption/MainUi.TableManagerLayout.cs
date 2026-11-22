@@ -40,15 +40,12 @@ internal sealed class TableManagerPanel : Panel
     private readonly ComboBox _profiles = Choice("Layout");
     private readonly CheckBox _enabled = new() { Text = "Enable Table Manager", AutoSize = true };
     private readonly ListBox _slots = new() { AccessibleName = "Slots", IntegralHeight = false };
-    private readonly ComboBox _kind = Choice("Slot type", "Home slots", "Active slots");
     private readonly ComboBox _binding = Choice("Active slot binding");
     private readonly NumericUpDown _left = Number(int.MinValue, int.MaxValue);
     private readonly NumericUpDown _top = Number(int.MinValue, int.MaxValue);
     private readonly NumericUpDown _width = Number(1, int.MaxValue);
     private readonly NumericUpDown _height = Number(-1, int.MaxValue);
-    private readonly NumericUpDown _delay = Number(1, int.MaxValue);
     private readonly CheckBox _stack = new() { Text = "Allow multiple tables in this slot", AutoSize = true };
-    private readonly CheckBox _sort = new() { Text = "Auto-sort tables", AutoSize = true };
     private readonly CheckBox _opened = new() { Text = "Move new tables to active slots", AutoSize = true };
     private readonly CheckBox _fold = new() { Text = "Return to home slot after fold", AutoSize = true };
     private readonly CheckBox _free = new() { Text = "Leave active tables in place", AutoSize = true };
@@ -65,6 +62,7 @@ internal sealed class TableManagerPanel : Panel
     private readonly GroupBox _geometry = new() { Text = "Slot geometry", Name = "SlotGeometry" };
     private readonly GroupBox _options = new() { Text = "Layout options" };
     private TableManagerConfig _draft;
+    private TableManagerConfig.Slot[] _savedHomes;
     private bool _loading;
     private bool _dirty;
 
@@ -88,9 +86,8 @@ internal sealed class TableManagerPanel : Panel
 
         var slotPanel = new GroupBox { Text = "Slots" };
         Put(this, slotPanel, 20, 116, 475, 365);
-        Put(slotPanel, _kind, 14, 26, 148);
-        _add = ButtonAt(slotPanel, "Add slot", 174, 24, 78, () => AddSlot());
-        _capture = ButtonAt(slotPanel, "Use open table", 260, 24, 128, CaptureSlot);
+        _add = ButtonAt(slotPanel, "Add slot", 14, 24, 78, () => AddSlot());
+        _capture = ButtonAt(slotPanel, "Use open table", 100, 24, 128, CaptureSlot);
         Put(slotPanel, _slots, 14, 63, 244, 241);
         _up = ButtonAt(slotPanel, "Up", 14, 316, 74, () => Reorder(-1));
         _down = ButtonAt(slotPanel, "Down", 94, 316, 87, () => Reorder(1));
@@ -101,23 +98,20 @@ internal sealed class TableManagerPanel : Panel
         Field(_geometry, "Top", _top, 99, 22, 75);
         Field(_geometry, "Width", _width, 13, 75, 75);
         Field(_geometry, "Height", _height, 99, 75, 75);
-        _width.Enabled = _height.Enabled = !manager.PreserveWindowSize;
-        LabelAt(_geometry, manager.PreserveWindowSize ? "Client keeps its current size" : "Use −1 for automatic height", 13, 121);
+        LabelAt(_geometry, "Use −1 for automatic height", 13, 121);
         Field(_geometry, "Active slot binding", _binding, 13, 151, 161);
         Put(_geometry, _stack, 13, 218, 162, 45);
         _stack.AutoSize = false;
 
         Put(this, _options, 513, 116, 237, 365);
-        Put(_options, _sort, 14, 28);
-        Field(_options, "Sort delay (ms)", _delay, 14, 59, 134);
-        Put(_options, _opened, 14, 120);
-        Put(_options, _fold, 14, 154);
-        Put(_options, _free, 14, 188);
-        Put(_options, _hero, 14, 222);
-        if (manager.PreserveWindowSize)
+        Put(_options, _opened, 14, 28);
+        Put(_options, _fold, 14, 62);
+        Put(_options, _free, 14, 96);
+        Put(_options, _hero, 14, 130);
+        if (manager.RenderedClient)
         {
             _opened.Enabled = _fold.Enabled = _free.Enabled = _hero.Enabled = false;
-            LabelAt(_options, "Sisal uses home slots only.\r\nHUD stays available. Automatic input\r\nis paused while the manager is enabled.", 14, 263);
+            LabelAt(_options, "Sisal uses home slots only.\r\nHUD stays available. Automatic input\r\nis paused while the manager is enabled.", 14, 171);
         }
 
         _apply = ButtonAt(this, "Save and activate", 20, 495, 132, Apply);
@@ -130,19 +124,13 @@ internal sealed class TableManagerPanel : Panel
             if (!_loading) ChangeEnabled(_enabled.Checked);
         });
         _profiles.SelectedIndexChanged += (_, _) => Run(SelectProfile);
-        _kind.SelectedIndexChanged += (_, _) => { if (!_loading) RefreshSlots(0); };
         _slots.SelectedIndexChanged += (_, _) => { if (!_loading) DisplaySlot(); };
         foreach (var control in new[] { _left, _top, _width, _height })
             control.ValueChanged += (_, _) => UpdateSlot();
         _binding.SelectedIndexChanged += (_, _) => UpdateSlot();
         _stack.CheckedChanged += (_, _) => UpdateSlot();
-        foreach (var check in new[] { _sort, _opened, _fold, _free, _hero })
+        foreach (var check in new[] { _opened, _fold, _free, _hero })
             check.CheckedChanged += (_, _) => UpdateOptions();
-        _delay.ValueChanged += (_, _) => UpdateOptions();
-
-        _loading = true;
-        _kind.SelectedIndex = 0;
-        _loading = false;
         Run(Reload);
     }
 
@@ -189,25 +177,23 @@ internal sealed class TableManagerPanel : Panel
 
     private void ReadDraft()
     {
+        _manager.ClearGeometryPreview();
         _draft = _profiles.SelectedItem is string name
             ? TableManagerConfig.Load(_manager.ConfigDir, name) : null;
+        RememberSavedSlots();
         _dirty = false;
         _loading = true;
-        _sort.Checked = _draft?.AutoSortTables == true;
-        _delay.Value = _draft?.AutoSortTime ?? 500;
         _opened.Checked = _draft?.ActivateOpened == true;
         _fold.Checked = _draft?.DeactivateAtFold == true;
         _free.Checked = _draft?.FreeDesktop == true;
         _hero.Checked = _draft?.WithHeroOnly == true;
         _loading = false;
         _duplicate.Enabled = _delete.Enabled = _apply.Enabled = _options.Enabled = _draft != null;
-        _delay.Enabled = _sort.Checked;
         RefreshSlots(0);
         UpdateStatus();
     }
 
-    private List<TableManagerConfig.Slot> Slots =>
-        _kind.SelectedIndex == 1 ? _draft?.ActiveSlots : _draft?.InactiveSlots;
+    private List<TableManagerConfig.Slot> Slots => _draft?.InactiveSlots;
 
     private void RefreshSlots(int selection)
     {
@@ -236,7 +222,7 @@ internal sealed class TableManagerPanel : Panel
         _width.Value = slot.Width;
         _height.Value = Math.Max(-1, slot.Height);
         _stack.Checked = slot.Multislot;
-        _binding.Enabled = _kind.SelectedIndex == 0;
+        _binding.Enabled = !_manager.RenderedClient;
         _binding.Items.Clear();
         _binding.Items.AddRange(new[] { "Any active slot", "No active slot" });
         for (int active = 0; active < _draft.ActiveSlots.Count; active++)
@@ -258,19 +244,21 @@ internal sealed class TableManagerPanel : Panel
         slot.Multislot = _stack.Checked;
         if (_binding.Enabled) slot.Bind = _binding.SelectedIndex - 2;
         _slots.Items[i] = SlotLabel(slot, i);
+        if (IsCurrentLayout())
+        {
+            int savedIndex = Array.IndexOf(_savedHomes, slot);
+            if (savedIndex >= 0) _manager.PreviewGeometry(savedIndex, slot);
+        }
         MarkDirty();
     }
 
     private void UpdateOptions()
     {
         if (_loading || _draft == null) return;
-        _draft.AutoSortTables = _sort.Checked;
-        _draft.AutoSortTime = (int)_delay.Value;
         _draft.ActivateOpened = _opened.Checked;
         _draft.DeactivateAtFold = _fold.Checked;
         _draft.FreeDesktop = _free.Checked;
         _draft.WithHeroOnly = _hero.Checked;
-        _delay.Enabled = _sort.Checked;
         MarkDirty();
     }
 
@@ -311,13 +299,12 @@ internal sealed class TableManagerPanel : Panel
     {
         int i = _slots.SelectedIndex;
         if (i < 0) return;
+        if (IsCurrentLayout())
+        {
+            int savedIndex = Array.IndexOf(_savedHomes, Slots[i]);
+            if (savedIndex >= 0) _manager.ClearGeometryPreview(savedIndex);
+        }
         Slots.RemoveAt(i);
-        if (_kind.SelectedIndex == 1)
-            foreach (var slot in _draft.InactiveSlots)
-            {
-                if (slot.Bind == i) slot.Bind = TableManagerConfig.NoBinding;
-                else if (slot.Bind > i) slot.Bind--;
-            }
         RefreshSlots(i);
         MarkDirty();
     }
@@ -327,12 +314,6 @@ internal sealed class TableManagerPanel : Panel
         int i = _slots.SelectedIndex, j = i + delta;
         if (i < 0 || j < 0 || j >= Slots.Count) return;
         (Slots[i], Slots[j]) = (Slots[j], Slots[i]);
-        if (_kind.SelectedIndex == 1)
-            foreach (var slot in _draft.InactiveSlots)
-            {
-                if (slot.Bind == i) slot.Bind = j;
-                else if (slot.Bind == j) slot.Bind = i;
-            }
         RefreshSlots(j);
         MarkDirty();
     }
@@ -370,6 +351,7 @@ internal sealed class TableManagerPanel : Panel
             throw new InvalidOperationException("Add at least one slot before activating the layout.");
         _draft.Save(_manager.ConfigDir, _draft.Name);
         UpdateSetting("TableManagerConfig", _draft.Name);
+        RememberSavedSlots();
         _dirty = false;
         DisplayEnabled();
         UpdateStatus();
@@ -381,6 +363,11 @@ internal sealed class TableManagerPanel : Panel
         finally { DisplayEnabled(); }
         UpdateStatus();
     }
+
+    private bool IsCurrentLayout() => _manager.Enabled &&
+        string.Equals(_draft?.Name, _manager.ConfigName, StringComparison.OrdinalIgnoreCase);
+
+    private void RememberSavedSlots() => _savedHomes = _draft?.InactiveSlots.ToArray() ?? [];
 
     private void UpdateSetting(string key, string value)
     {

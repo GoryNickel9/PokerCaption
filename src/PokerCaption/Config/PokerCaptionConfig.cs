@@ -32,7 +32,9 @@ namespace PokerCaption.Config
             ini.Find(Section)?.Entries.RemoveAll(entry =>
                 entry.Key.Equals("StartMinimized", StringComparison.OrdinalIgnoreCase) ||
                 entry.Key.Equals("AutoTimebank", StringComparison.OrdinalIgnoreCase) ||
-                entry.Key.Equals("AutoHideChat", StringComparison.OrdinalIgnoreCase));
+                entry.Key.Equals("AutoHideChat", StringComparison.OrdinalIgnoreCase) ||
+                entry.Key.Equals("CloseCantFound", StringComparison.OrdinalIgnoreCase) ||
+                entry.Key.Equals("CNFafter", StringComparison.OrdinalIgnoreCase));
 
         public static PokerCaptionConfig CreateDefault(string iniPath)
         {
@@ -87,7 +89,7 @@ namespace PokerCaption.Config
     /// <summary>
     /// Caricatore dei config del Table manager (TableManagerConfigs\&lt;name&gt;):
     /// sezioni [inact] / [act] con slot left/top/width/(height)/bind/multislot
-    /// e [options] con autoSortTables/autoSortTime/deactivateAtFold/activateOpened/
+    /// e [options] con deactivateAtFold/activateOpened/
     /// freeDesktop/withHeroOnly.
     /// </summary>
     public sealed class TableManagerConfig
@@ -95,6 +97,7 @@ namespace PokerCaption.Config
         public const int MaxSlots = 65;
         public const int NoBinding = -1;
         public const int AnyActiveSlot = -2;
+        internal const int AutoSortDelayMs = 500;
 
         public sealed class Slot
         {
@@ -110,8 +113,7 @@ namespace PokerCaption.Config
         public string Name;
         public List<Slot> InactiveSlots = new List<Slot>();
         public List<Slot> ActiveSlots = new List<Slot>();
-        public bool AutoSortTables, DeactivateAtFold, ActivateOpened, FreeDesktop, WithHeroOnly;
-        public int AutoSortTime = 500;
+        public bool DeactivateAtFold, ActivateOpened, FreeDesktop, WithHeroOnly;
 
         public static string ProfilePath(string dir, string name)
         {
@@ -158,8 +160,6 @@ namespace PokerCaption.Config
             LoadSlots(f, "inact", cfg.InactiveSlots);
             LoadSlots(f, "act", cfg.ActiveSlots);
 
-            cfg.AutoSortTables = f.GetBool("options", "autoSortTables");
-            cfg.AutoSortTime = Math.Max(1, f.GetInt("options", "autoSortTime", 500));
             cfg.DeactivateAtFold = f.GetBool("options", "deactivateAtFold");
             cfg.ActivateOpened = f.GetBool("options", "activateOpened");
             cfg.FreeDesktop = f.GetBool("options", "freeDesktop");
@@ -174,8 +174,8 @@ namespace PokerCaption.Config
             file.MergeFrom(_source);
             WriteSlots(file, "inact", InactiveSlots);
             WriteSlots(file, "act", ActiveSlots);
-            file.Set("options", "autoSortTables", AutoSortTables ? 1 : 0);
-            file.Set("options", "autoSortTime", AutoSortTime);
+            file.Set("options", "autoSortTables", 1);
+            file.Set("options", "autoSortTime", AutoSortDelayMs);
             file.Set("options", "deactivateAtFold", DeactivateAtFold ? 1 : 0);
             file.Set("options", "activateOpened", ActivateOpened ? 1 : 0);
             file.Set("options", "freeDesktop", FreeDesktop ? 1 : 0);

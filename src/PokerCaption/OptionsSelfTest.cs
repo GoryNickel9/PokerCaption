@@ -21,7 +21,8 @@ namespace PokerCaption
                 foreach (var name in UnavailableOptions)
                     check("Options unavailable " + name, Ctl(page, name) is { Enabled: false }, "");
 
-                var retiredOptions = new[] { ("CheckBox13", "AutoTimebank"), ("cbAutoHideChat", "AutoHideChat"), ("CheckBox14", "StartMinimized") };
+                var retiredOptions = new[] { ("CheckBox13", "AutoTimebank"), ("cbAutoHideChat", "AutoHideChat"), ("CheckBox14", "StartMinimized"),
+                    ("CheckBox82", "CloseCantFound"), ("UpDown38", "CNFafter") };
                 foreach (var (control, key) in retiredOptions)
                 {
                     check("Options removed control " + control, Ctl(page, control) == null, "");
@@ -46,7 +47,7 @@ namespace PokerCaption
                         Program.Ini.GetBool(section, key, !initial) == initial, "");
                 }
 
-                check("Options dialog rule count", controller._dialogRules.Count == 22,
+                check("Options dialog rule count", controller._dialogRules.Count == 19,
                     controller._dialogRules.Count.ToString());
                 foreach (var rule in controller._dialogRules)
                 {
@@ -72,8 +73,12 @@ namespace PokerCaption
                     Program.Ini.Set("AutoDialog", "Delay" + i, i + 1);
                     Program.Ini.Set(section, key, 1);
                 }
-                Program.Ini.Set("AutoDialog", "Caption3", "My News");
-                Program.Ini.Set("AutoDialog", "Delay3", 17);
+                Program.Ini.Set("AutoDialog", "Caption3", "Player cannot be found.");
+                Program.Ini.Set("AutoDialog", "Delay3", 1000);
+                Program.Ini.Set("AutoDialog", "Caption4", "Find Seat (Cash Games)");
+                Program.Ini.Set("AutoDialog", "Caption5", "Seat Me / All seats have been taken");
+                Program.Ini.Set("AutoDialog", "Caption6", "My News");
+                Program.Ini.Set("AutoDialog", "Delay6", 17);
                 controller.SyncDialogsFromIni();
                 check("Options removed rules are purged and surviving delay is preserved",
                     removed.All(entry => Program.Ini.Get(section, entry.Item2) == null) &&
@@ -83,43 +88,10 @@ namespace PokerCaption
                     Program.Ini.Get("AutoDialog", "Caption1") == null, "");
                 if (Ctl(page, "cbCloseMyNews") is CheckBox myNews) myNews.Checked = false;
 
-                if (Ctl(page, "CheckBox82") is CheckBox delayed && Ctl(page, "Edit39") is TextBox field &&
-                    Ctl(page, "UpDown38") is NumericUpDown spinner)
-                {
-                    delayed.Checked = true;
-                    field.Text = "3";
-                    check("Options delay text to spinner and milliseconds", spinner.Value == 3 &&
-                        Program.Ini.GetInt(section, "CNFafter") == 3 &&
-                        Program.Ini.GetInt("AutoDialog", "Delay0") == 3000, "");
-                    spinner.Value = 0;
-                    check("Options delay spinner accepts zero", field.Text == "0" &&
-                        Program.Ini.GetInt("AutoDialog", "Delay0", -1) == 0, "");
-                    delayed.Checked = false;
-                    Program.Ini.Set(section, "CloseCantFound", 1);
-                    Program.Ini.Set(section, "CNFafter", 2);
-                    controller.SyncDialogsFromIni();
-                    check("Options delay migrates original checkbox and seconds", delayed.Checked && spinner.Value == 2 &&
-                        Program.Ini.GetInt("AutoDialog", "Delay0", -1) == 2000, "");
-                    field.Text = "25";
-                    check("Options VCL spinner clamps typed seconds", spinner.Minimum == 0 &&
-                        spinner.Maximum == 20 && spinner.Value == 20 && field.Text == "25" &&
-                        Program.Ini.GetInt("AutoDialog", "Delay0", -1) == 20000, "");
-                    field.Text = "abc";
-                    check("Options VCL spinner retains its position on invalid text", spinner.Value == 20 &&
-                        Program.Ini.GetInt("AutoDialog", "Delay0", -1) == 20000, "");
-                    spinner.Value = 19;
-                    check("Options VCL spinner writes seconds after manual input", field.Text == "19" &&
-                        Program.Ini.GetInt("AutoDialog", "Delay0", -1) == 19000, "");
-                    field.Text = "-2";
-                    check("Options VCL spinner clamps negative text", spinner.Value == 0 &&
-                        Program.Ini.GetInt("AutoDialog", "Delay0", -1) == 0, "");
-                    string group = System.Globalization.CultureInfo.CurrentCulture.NumberFormat.NumberGroupSeparator;
-                    field.Text = "1" + group + "2";
-                    bool grouped = spinner.Value == 12;
-                    field.Text = "-";
-                    check("Options VCL spinner accepts grouped digits and bare minus", grouped && spinner.Value == 0, "");
-                }
-                else check("Options delay controls", false, "missing checkbox, field or spinner");
+                var columns = Ctl(page, "dialogColumns") as TableLayoutPanel;
+                check("Options dialog rules span two populated columns", columns is { ColumnCount: 2 } &&
+                    columns.Controls.Count == 2 && columns.Controls.Cast<Control>().All(column => column.Controls.Count > 0) &&
+                    columns.Controls.Cast<Control>().Sum(column => column.Controls.OfType<CheckBox>().Count()) == 23, "");
 
                 check("Options Find a Player removed", Ctl(page, "CheckBox57") == null &&
                     Ctl(page, "Edit23") == null && Ctl(page, "UpDown45") == null, "");

@@ -90,6 +90,7 @@ namespace PokerCaption
             // tab Betscript + Options/Table manager/Dialogs: prima del blocco selftest,
             // che può chiudere il form a metà Build (il wiring su form chiuso è rumore)
             AttachBetscript(f);
+            UpdateBetscriptLayoutNotice();
             WireTabs(f);
 
             // Save options salva PokerCaption.ini e conserva il backup .ini_bak.
@@ -260,6 +261,7 @@ namespace PokerCaption
 
         private void RefreshClientIntegration()
         {
+            UpdateBetscriptLayoutNotice();
             Program.Shared.SetMainHwnd(Form.Handle);
             if (_nativeHook == null)
             {
@@ -282,6 +284,12 @@ namespace PokerCaption
             Program.Service.RefreshClientWork();
         }
 
+        private void UpdateBetscriptLayoutNotice()
+        {
+            if (Ctl(Form, "BetscriptLayoutNotice") is Label notice)
+                notice.Visible = Program.Service?.Manager.LayoutOnly == true;
+        }
+
         private string BetscriptInfo()
         {
             var n = Program.Ini.GetInt("AdvancedBets", "Count", 0);
@@ -301,14 +309,9 @@ namespace PokerCaption
         {
             if (_sessionStatus == null || Form == null) return;
             var tables = Program.Service?.Tables;
-            int count = tables?.Count ?? 0;
             string nickname = tables?.FirstOrDefault(table => !string.IsNullOrEmpty(table.HeroNick))?.HeroNick
                 ?? Program.HeroNick;
-            var session = SessionStats.Current;
-            string state = count == 0
-                ? ClientLocator.FindClients().Count > 0 ? "Client connected. No open tables." : "Waiting for client"
-                : $"{count} open tables   |   {session.SessionHands} hands   |   {SessionStats.FormatTime(session.SessionTime)}";
-            _sessionStatus.Text = string.IsNullOrEmpty(nickname) ? state : $"{nickname}   |   {state}";
+            _sessionStatus.Text = nickname ?? "";
         }
 
         // ---------- tray ----------

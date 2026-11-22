@@ -66,16 +66,14 @@ public sealed partial class AutoDialogEngine
         {
             var config = new IniFile(null);
             config.Set("AutoDialog", "Caption0", caption);
-            int delay = caption == PlayerNotFoundCaption ? 1000 : 0;
+            const int delay = 0;
             config.Set("AutoDialog", "Delay0", delay);
             engine.Load(config);
             var (title, label, childClass) = caption switch
             {
                 RegistrationCaption => (RegistrationTitle, "OK", PokerStarsRegistrationButtonClass),
-                SeatTakenCaption => ("Seat Me", (string)null, "Static"),
                 ReminderCaption => ("", "Reminder: Your current session has been active for 3 hours", "Static"),
                 FeedbackCaption => ("", "FeedbackforPokerStars", "Static"),
-                PlayerNotFoundCaption => ("Find a Player", "Player Example cannot be found", "Static"),
                 _ => (caption, (string)null, "Static"),
             };
             check("Options WinForms dialog " + caption,
@@ -104,16 +102,7 @@ public sealed partial class AutoDialogEngine
                     Exercise("", label.ToLowerInvariant(), expectClose: false) &&
                     Exercise("", "Feedbackfor", otherLabel: "PokerStars") &&
                     Exercise("", "Unrelated text", otherLabel: label, expectClose: false), "");
-            if (caption == PlayerNotFoundCaption)
-            {
-                check("Options WinForms Player cannot be found dialog gate", Exercise(caption, null, delayMs: delay, expectClose: false) &&
-                    Exercise(title, "Player Example was found", delayMs: delay, expectClose: false), "");
-                check("Options WinForms player lookup cancels stale delayed close",
-                    Exercise(title, label, delayMs: delay, expectClose: false,
-                        beforeDeadline: child => child.SetText("Player Example was found")) &&
-                    Exercise(title, label, delayMs: delay, expectClose: false,
-                        beforeDeadline: _ => engine.Load(new IniFile(null))), "");
-            }
+
         }
 
         foreach (var (key, caption) in new[]

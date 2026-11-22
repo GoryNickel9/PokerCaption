@@ -11,19 +11,26 @@ namespace PokerCaption
             {
                 Name = "BetFormulaGuide",
                 Text = "BetScript formula guide",
-                ClientSize = new Size(568, 520),
+                Icon = ProductBrand.Icon,
+                BackColor = DesktopWindow.Canvas,
+                ClientSize = new Size(690, 560),
                 MinimumSize = new Size(440, 360),
                 StartPosition = FormStartPosition.CenterParent,
                 ShowInTaskbar = false,
                 MinimizeBox = false,
                 MaximizeBox = false,
             };
-            var guide = new TextBox
+            var guide = new RichTextBox
             {
                 Name = "FormulaGuideText", AccessibleName = "Formula syntax and examples",
-                Dock = DockStyle.Fill, Multiline = true, ReadOnly = true,
-                ScrollBars = ScrollBars.Vertical, BackColor = SystemColors.Window,
-                Text = """
+                Dock = DockStyle.Fill, ReadOnly = true, DetectUrls = false, WordWrap = true,
+                BorderStyle = BorderStyle.None, BackColor = SystemColors.Window,
+                ForeColor = DesktopWindow.Ink, ScrollBars = RichTextBoxScrollBars.Vertical
+            };
+            using var bodyFont = new Font("Consolas", 11);
+            using var headingFont = new Font(bodyFont, FontStyle.Bold);
+            guide.Font = bodyFont;
+            guide.Text = """
                     OPERATORS
                     Use ^ for powers, * and / for multiplication and division,
                     and + and - for addition and subtraction. Use parentheses to
@@ -60,8 +67,16 @@ namespace PokerCaption
 
                     Some table values may be unavailable on your client.
                     BetScript tries the next rule if a required value is missing.
-                    """,
-            };
+                    """.ReplaceLineEndings("\r\n");
+            foreach (var heading in new[] { "OPERATORS", "TABLE VALUES", "EXAMPLES", "DISPLAY" })
+            {
+                guide.Select(guide.Text.IndexOf(heading, StringComparison.Ordinal), heading.Length);
+                guide.SelectionFont = headingFont;
+                guide.SelectionColor = DesktopWindow.Accent;
+            }
+            guide.Select(0, 0);
+            var body = new Panel { Dock = DockStyle.Fill, BackColor = SystemColors.Window, Padding = new Padding(18, 14, 12, 10) };
+            body.Controls.Add(guide);
             var footer = new FlowLayoutPanel
             {
                 Dock = DockStyle.Bottom, Height = 44, Padding = new Padding(8, 5, 8, 0),
@@ -69,7 +84,7 @@ namespace PokerCaption
             };
             var close = new Button { Text = "Close", AutoSize = true, DialogResult = DialogResult.Cancel };
             footer.Controls.Add(close);
-            dialog.Controls.Add(guide);
+            dialog.Controls.Add(body);
             dialog.Controls.Add(footer);
             dialog.CancelButton = close;
             dialog.ActiveControl = close;
